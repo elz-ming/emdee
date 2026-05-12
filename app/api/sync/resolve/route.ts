@@ -1,4 +1,4 @@
-import { put, head } from "@vercel/blob";
+import { put, get } from "@vercel/blob";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { adminClient } from "@/src/lib/supabase/admin";
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     const resolved = path.resolve(docsDir, rel);
     const content = await readFile(resolved, "utf8");
     const hash = await sha256(content);
-    await put(rel, content, { access: "public", addRandomSuffix: false, token });
+    await put(rel, content, { access: "private", addRandomSuffix: false, token });
     await adminClient()
       .from("sync_manifest")
       .upsert({ file_path: rel, content_hash: hash, synced_at: now, clerk_id: null }, { onConflict: "file_path" });
@@ -38,9 +38,9 @@ export async function POST(request: Request) {
   }
 
   // keep-cloud: fetch blob content, overwrite local file, update manifest
-  const blobMeta = await head(rel, { token });
-  const cloudRes = await fetch(blobMeta.url);
-  const cloudContent = await cloudRes.text();
+  const blobResult = await get(rel, { token, access: "private" });
+  if (!blobResult) return Response.json({ error: "blob not found" }, { status: 404 });
+  const cloudContent = await new Response(blobResult.stream).text();
   const hash = await sha256(cloudContent);
 
   const { writeFile, mkdir } = await import("node:fs/promises");

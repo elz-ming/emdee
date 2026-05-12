@@ -111,7 +111,7 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   await Promise.all(
     localFiles.map(({ namespacedPath, content }) =>
-      put(namespacedPath, content, { access: "public", addRandomSuffix: false, token })
+      put(namespacedPath, content, { access: "private", addRandomSuffix: false, token })
     )
   );
 

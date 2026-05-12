@@ -47,7 +47,7 @@ export async function PUT(request: Request) {
 
   const blobPath = `${ns}/${rel}`;
   try {
-    await put(blobPath, body, { access: "public", addRandomSuffix: false, token });
+    await put(blobPath, body, { access: "private", addRandomSuffix: false, token });
     return new Response(null, { status: 204 });
   } catch (err) {
     return new Response(`save failed: ${(err as Error).message}`, { status: 500 });

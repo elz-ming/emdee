@@ -1,5 +1,5 @@
 import { buildIndex, buildIndexFromContents } from "@/src/core/indexer";
-import { list } from "@vercel/blob";
+import { list, get } from "@vercel/blob";
 import path from "node:path";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +26,15 @@ export async function GET(request: Request) {
   const mdBlobs = blobs.filter((b) => b.pathname.endsWith(".md"));
 
   const files = await Promise.all(
-    mdBlobs.map(async (b) => ({
-      // Strip the namespace prefix so paths are relative (e.g. "userId/EMDEE.md" → "EMDEE.md")
-      path: b.pathname.slice(prefix.length),
-      content: await fetch(b.url).then((r) => r.text()),
-    }))
+    mdBlobs.map(async (b) => {
+      const result = await get(b.pathname, { token, access: "private" });
+      const content = result ? await new Response(result.stream).text() : "";
+      return {
+        // Strip the namespace prefix so paths are relative (e.g. "userId/EMDEE.md" → "EMDEE.md")
+        path: b.pathname.slice(prefix.length),
+        content,
+      };
+    })
   );
 
   const index = buildIndexFromContents(files);
