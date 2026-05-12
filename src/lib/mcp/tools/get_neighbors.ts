@@ -1,5 +1,5 @@
-import { loadVaultIndex } from "./vault.js";
-import type { DocIndex, DocNode, Link, ToolContext } from "./types.js";
+import { loadVaultIndex } from "./vault";
+import type { DocIndex, DocNode, Link, ToolContext } from "./types";
 
 function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };

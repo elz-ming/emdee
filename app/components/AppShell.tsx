@@ -12,7 +12,7 @@ interface AppShellProps {
 
 export function AppShell({ namespace }: AppShellProps) {
   return (
-    <div style={{ height: "100vh" }}>
+    <div style={{ height: "100%", minHeight: "100svh" }}>
       <App namespace={namespace} />
     </div>
   );

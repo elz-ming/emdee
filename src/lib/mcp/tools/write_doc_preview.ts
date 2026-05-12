@@ -1,5 +1,5 @@
-import { validatePath, readVaultFile } from "./vault.js";
-import type { ToolContext } from "./types.js";
+import { validatePath, readVaultFile } from "./vault";
+import type { ToolContext } from "./types";
 
 function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };

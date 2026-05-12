@@ -5,6 +5,7 @@ import { GraphView } from "./GraphView";
 import { DocEditor } from "./DocEditor";
 import type { DocIndex, DocNode } from "@/src/web/types";
 import { useDocsChanged } from "./useDocsChanged";
+import { useDocLog } from "./useDocLog";
 
 interface TreeNode {
   doc: DocNode;
@@ -165,9 +166,29 @@ function DocTree({ nodes, parentPath, parentTitle, activePath, collapsed, onSele
   );
 }
 
-type View = "doc" | "graph";
+type View = "doc" | "graph" | "log";
 type DocMode = "raw" | "rendered";
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
+
+interface GraphModalContext {
+  focalPath: string;
+  focalTitle: string;
+}
+
+function slugify(title: string): string {
+  return title.toLowerCase().trim()
+    .replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-");
+}
+
+function appendToSection(content: string, heading: string, line: string): string {
+  const idx = content.search(new RegExp(`^${heading}\\s*$`, "im"));
+  if (idx === -1) return content.trimEnd() + `\n\n${heading}\n${line}\n`;
+  const after = content.slice(idx + heading.length);
+  const nextSection = after.search(/^## /m);
+  if (nextSection === -1) return content.trimEnd() + "\n" + line + "\n";
+  const insertAt = idx + heading.length + nextSection;
+  return content.slice(0, insertAt).trimEnd() + "\n" + line + "\n\n" + content.slice(insertAt);
+}
 
 interface ConflictFile {
   path: string;
@@ -205,6 +226,21 @@ export function App({ namespace }: { namespace: string }) {
   const [resolvingPath, setResolvingPath] = useState<string | null>(null);
   const [mcpCommand, setMcpCommand] = useState<string | null>(null);
   const [mcpCopied, setMcpCopied] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [addChildCtx, setAddChildCtx] = useState<GraphModalContext | null>(null);
+  const [addChildTitle, setAddChildTitle] = useState("");
+  const [addChildBusy, setAddChildBusy] = useState(false);
+  const [addAssocCtx, setAddAssocCtx] = useState<GraphModalContext | null>(null);
+  const [assocQuery, setAssocQuery] = useState("");
+  const [assocTarget, setAssocTarget] = useState<string | null>(null);
+  const [assocLabel, setAssocLabel] = useState("");
+  const [assocBusy, setAssocBusy] = useState(false);
+  const [deleteCtx, setDeleteCtx] = useState<GraphModalContext | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const docLog = useDocLog(namespace);
+  const prevContentRef = useRef<Map<string, string>>(new Map());
+  const loggedInSession = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/sync").then((r) => r.json()).then((d) => setCanSync(d.canSync)).catch(() => {});
@@ -231,6 +267,7 @@ export function App({ namespace }: { namespace: string }) {
       const data = await res.json();
       if (data.conflicts && data.conflicts.length > 0) {
         setConflicts(data.conflicts);
+        setConflictModalOpen(true);
         setSyncState("idle");
       } else {
         setConflicts([]);
@@ -347,13 +384,24 @@ export function App({ namespace }: { namespace: string }) {
   // Explicit Docs/Graph buttons (and "Open doc" inside the graph) switch views.
   const selectDoc = useCallback((p: string) => {
     setActivePath(p);
+    setMobileSidebarOpen(false);
   }, []);
 
   useEffect(() => {
     setSaveState("idle");
-  }, [activeDoc?.path]);
+    // When switching docs, clear prev-content tracking for this new path so the
+    // next edit session captures the freshly-loaded version as previousContent.
+    if (activePath) prevContentRef.current.delete(activePath);
+  }, [activePath]);
+
+  const indexRef = useRef<DocIndex | null>(null);
+  useEffect(() => { indexRef.current = index; }, [index]);
 
   const save = useCallback(async (path: string, content: string) => {
+    const shouldLog = !loggedInSession.current.has(path);
+    const previousContent = shouldLog
+      ? (prevContentRef.current.get(path) ?? indexRef.current?.docs.find(d => d.path === path)?.content)
+      : undefined;
     setSaveState("saving");
     try {
       localEdit.current = true;
@@ -364,11 +412,116 @@ export function App({ namespace }: { namespace: string }) {
       });
       if (!res.ok) throw new Error(await res.text());
       setSaveState("saved");
+      if (shouldLog && previousContent !== undefined && previousContent !== content) {
+        const title = indexRef.current?.docs.find(d => d.path === path)?.title ?? path;
+        docLog.push({ path, title, action: "edit", previousContent });
+        loggedInSession.current.add(path);
+      }
     } catch {
       setSaveState("error");
       localEdit.current = false;
     }
-  }, [namespace]);
+  }, [namespace, docLog]);
+
+  const openDeleteNode = useCallback((focalPath: string, focalTitle: string) => {
+    setDeleteCtx({ focalPath, focalTitle });
+  }, []);
+
+  const submitDeleteNode = useCallback(async () => {
+    if (!deleteCtx) return;
+    const { focalPath, focalTitle } = deleteCtx;
+    setDeleteBusy(true);
+    try {
+      const previousContent = index?.docs.find((d) => d.path === focalPath)?.content;
+      await fetch(`/api/doc?path=${encodeURIComponent(focalPath)}&ns=${encodeURIComponent(namespace)}`, {
+        method: "DELETE",
+      });
+      docLog.push({ path: focalPath, title: focalTitle, action: "delete", previousContent });
+      if (activePath === focalPath) {
+        setActivePath(index?.entry ?? index?.docs.find(d => d.path !== focalPath)?.path ?? null);
+      }
+      await loadIndex(false);
+      setDeleteCtx(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteCtx, namespace, index, activePath, loadIndex, docLog]);
+
+  const handleRevertLog = useCallback(async (entry: import("./useDocLog").LogEntry) => {
+    if (entry.action === "create") {
+      await fetch(`/api/doc?path=${encodeURIComponent(entry.path)}&ns=${encodeURIComponent(namespace)}`, {
+        method: "DELETE",
+      });
+    } else {
+      if (!entry.previousContent) return;
+      await fetch(`/api/doc?path=${encodeURIComponent(entry.path)}&ns=${encodeURIComponent(namespace)}`, {
+        method: "PUT",
+        headers: { "content-type": "text/markdown" },
+        body: entry.previousContent,
+      });
+    }
+    await loadIndex(false);
+    docLog.remove(entry.id);
+  }, [namespace, loadIndex, docLog]);
+
+  const openAddChild = useCallback((focalPath: string, focalTitle: string) => {
+    setAddChildCtx({ focalPath, focalTitle });
+    setAddChildTitle("");
+  }, []);
+
+  const openAddAssoc = useCallback((focalPath: string, focalTitle: string) => {
+    setAddAssocCtx({ focalPath, focalTitle });
+    setAssocQuery("");
+    setAssocTarget(null);
+    setAssocLabel("");
+  }, []);
+
+  const submitAddChild = useCallback(async () => {
+    if (!addChildCtx || !addChildTitle.trim()) return;
+    const slug = slugify(addChildTitle);
+    if (!slug) return;
+    setAddChildBusy(true);
+    try {
+      const focalDir = addChildCtx.focalPath.includes("/")
+        ? addChildCtx.focalPath.slice(0, addChildCtx.focalPath.lastIndexOf("/") + 1)
+        : "";
+      const newPath = `${focalDir}${slug}.md`;
+      const content = `# ${addChildTitle.trim()}\n\n> Add a summary here.\n\n## Child of\n- [[${addChildCtx.focalTitle}]]\n`;
+      await fetch(`/api/doc?path=${encodeURIComponent(newPath)}&ns=${encodeURIComponent(namespace)}`, {
+        method: "PUT",
+        headers: { "content-type": "text/markdown" },
+        body: content,
+      });
+      await loadIndex(false);
+      setActivePath(newPath);
+      docLog.push({ path: newPath, title: addChildTitle.trim(), action: "create" });
+      setAddChildCtx(null);
+    } finally {
+      setAddChildBusy(false);
+    }
+  }, [addChildCtx, addChildTitle, namespace, loadIndex, docLog]);
+
+  const submitAddAssoc = useCallback(async () => {
+    if (!addAssocCtx || !assocTarget) return;
+    setAssocBusy(true);
+    try {
+      const focalDoc = index?.docs.find((d) => d.path === addAssocCtx.focalPath);
+      const targetDoc = index?.docs.find((d) => d.path === assocTarget);
+      if (!focalDoc || !targetDoc) return;
+      const newLine = assocLabel.trim()
+        ? `- [[${targetDoc.title}]] (${assocLabel.trim()})`
+        : `- [[${targetDoc.title}]]`;
+      const updatedContent = appendToSection(focalDoc.content, "## Associated with", newLine);
+      await fetch(
+        `/api/doc?path=${encodeURIComponent(addAssocCtx.focalPath)}&ns=${encodeURIComponent(namespace)}`,
+        { method: "PUT", headers: { "content-type": "text/markdown" }, body: updatedContent }
+      );
+      await loadIndex(true);
+      setAddAssocCtx(null);
+    } finally {
+      setAssocBusy(false);
+    }
+  }, [addAssocCtx, assocTarget, assocLabel, namespace, loadIndex, index]);
 
   const handleWikiLinkClick = useCallback((title: string) => {
     const match = index?.docs.find((d) => d.title.toLowerCase() === title.toLowerCase());
@@ -382,9 +535,36 @@ export function App({ namespace }: { namespace: string }) {
     saveTimer.current = window.setTimeout(() => save(activePath, next), 600);
   }, [activePath, save]);
 
+  const assocFilteredDocs = useMemo(() => {
+    if (!index || !addAssocCtx) return [];
+    const q = assocQuery.toLowerCase();
+    return index.docs.filter(
+      (d) => d.path !== addAssocCtx.focalPath && (q === "" || d.title.toLowerCase().includes(q))
+    );
+  }, [index, addAssocCtx, assocQuery]);
+
   return (
     <div className="app">
-      <div className="sidebar-wrap">
+      <div
+        className="sidebar-backdrop"
+        data-open={mobileSidebarOpen}
+        onClick={() => setMobileSidebarOpen(false)}
+        aria-hidden="true"
+      />
+      <div className="mobile-header">
+        <button
+          className="mobile-hamburger"
+          onClick={() => setMobileSidebarOpen((v) => !v)}
+          aria-label="Toggle sidebar"
+          type="button"
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M2 4.5h14M2 9h14M2 13.5h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+        <span className="mobile-title">EMDEE</span>
+      </div>
+      <div className="sidebar-wrap" data-open={mobileSidebarOpen}>
         <aside className="sidebar" data-collapsed={sidebarCollapsed}>
           <h1>EMDEE</h1>
           {isOwnNamespace ? (
@@ -446,54 +626,6 @@ export function App({ namespace }: { namespace: string }) {
               <a href={`/${user?.id}`} className="signin-btn">Go to my workspace</a>
             </div>
           )}
-          {canSync && (
-            <div className="sync-section">
-              <button
-                className="sync-btn"
-                onClick={() => handleSync(false)}
-                disabled={syncState === "syncing"}
-                type="button"
-              >
-                {syncState === "idle" && (conflicts.length > 0 ? `${conflicts.length} conflict${conflicts.length > 1 ? "s" : ""}` : "Push to Cloud")}
-                {syncState === "syncing" && "Syncing…"}
-                {syncState === "done" && "✓ Synced"}
-                {syncState === "error" && "Sync failed"}
-              </button>
-              {conflicts.length > 0 && (
-                <div className="conflict-panel">
-                  <div className="conflict-header">
-                    <span>Conflicts — both sides changed</span>
-                    <button className="conflict-force-btn" onClick={() => handleSync(true)} type="button">
-                      Push all local
-                    </button>
-                  </div>
-                  {conflicts.map((c) => (
-                    <div key={c.path} className="conflict-row">
-                      <span className="conflict-path" title={c.path}>{c.path}</span>
-                      <div className="conflict-actions">
-                        <button
-                          className="conflict-btn"
-                          onClick={() => handleResolve(c.path, "keep-local")}
-                          disabled={resolvingPath === c.path}
-                          type="button"
-                        >
-                          Mine
-                        </button>
-                        <button
-                          className="conflict-btn"
-                          onClick={() => handleResolve(c.path, "keep-cloud")}
-                          disabled={resolvingPath === c.path}
-                          type="button"
-                        >
-                          Cloud
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <nav>
             <button onClick={() => setView("doc")} data-active={view === "doc"}>Docs</button>
             <button onClick={() => setView("graph")} data-active={view === "graph"}>Graph</button>
@@ -507,6 +639,20 @@ export function App({ namespace }: { namespace: string }) {
             onSelect={selectDoc}
             onToggle={toggleCollapsed}
           />
+          <div className="sidebar-footer">
+            <button
+              className="sidebar-footer-btn"
+              onClick={() => setView("log")}
+              data-active={view === "log"}
+              type="button"
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
+                <path d="M6.5 3.5V6.5L8.5 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
+              History
+            </button>
+          </div>
         </aside>
         <button
           className="sidebar-rail"
@@ -518,6 +664,19 @@ export function App({ namespace }: { namespace: string }) {
         </button>
       </div>
       <main className="content">
+        {canSync && (
+          <div className="content-topbar">
+            <span className="spacer" />
+            <button
+              className={`sync-inline-btn${conflicts.length > 0 ? " has-conflicts" : ""}`}
+              onClick={() => conflicts.length > 0 ? setConflictModalOpen(true) : handleSync(false)}
+              disabled={syncState === "syncing"}
+              type="button"
+            >
+              {syncState === "syncing" ? "Syncing…" : syncState === "done" ? "✓ Synced" : syncState === "error" ? "⚠ Sync failed" : conflicts.length > 0 ? `${conflicts.length} conflict${conflicts.length > 1 ? "s" : ""}` : "Push to Cloud"}
+            </button>
+          </div>
+        )}
         {view === "doc" && activeDoc && (
           <>
             <div className="toolbar">
@@ -548,11 +707,227 @@ export function App({ namespace }: { namespace: string }) {
             index={index}
             activePath={activePath}
             onSelect={(p) => { setActivePath(p); setView("doc"); }}
+            onAddChild={isOwnNamespace ? openAddChild : undefined}
+            onAddAssociation={isOwnNamespace ? openAddAssoc : undefined}
+            onDeleteNode={isOwnNamespace ? openDeleteNode : undefined}
           />
         )}
+        {view === "log" && (
+          <div className="log-view">
+            <div className="log-header">
+              <span className="log-header-title">History</span>
+              <span className="log-header-note">Edits by you in this browser. MCP edits not yet tracked.</span>
+              <span className="spacer" />
+              {docLog.entries.length > 0 && (
+                <button className="btn-ghost" onClick={docLog.clear} type="button" style={{ fontSize: 11 }}>Clear all</button>
+              )}
+            </div>
+            {docLog.entries.length === 0 ? (
+              <div className="empty"><p>No changes recorded yet.</p></div>
+            ) : (
+              <div className="log-list">
+                {docLog.entries.map((entry) => (
+                  <div key={entry.id} className="log-entry">
+                    <span className={`log-badge log-badge-${entry.action}`}>
+                      {entry.action}
+                    </span>
+                    <div className="log-entry-info">
+                      <span className="log-entry-title">{entry.title}</span>
+                      <span className="log-entry-path">{entry.path}</span>
+                    </div>
+                    <span className="log-entry-time">{relativeTime(entry.timestamp)}</span>
+                    {(entry.action === "delete" || (entry.action === "create") || (entry.action === "edit" && entry.previousContent)) && (
+                      <button
+                        className="btn-ghost log-revert-btn"
+                        onClick={() => handleRevertLog(entry)}
+                        type="button"
+                        title={entry.action === "create" ? "Delete this doc" : "Restore previous content"}
+                      >
+                        ↩ Revert
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </main>
+
+      {/* Add child modal */}
+      {addChildCtx && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setAddChildCtx(null)}>
+          <div className="modal" role="dialog" aria-modal="true">
+            <p className="modal-title">New child doc</p>
+            <p className="modal-subtitle">Will be linked as a child of <strong>{addChildCtx.focalTitle}</strong></p>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="add-child-title">Title</label>
+              <input
+                id="add-child-title"
+                className="modal-input"
+                type="text"
+                placeholder="e.g. My New Doc"
+                value={addChildTitle}
+                onChange={(e) => setAddChildTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitAddChild()}
+                autoFocus
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setAddChildCtx(null)} type="button">Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={submitAddChild}
+                disabled={!addChildTitle.trim() || addChildBusy}
+                type="button"
+              >
+                {addChildBusy ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add association modal */}
+      {addAssocCtx && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setAddAssocCtx(null)}>
+          <div className="modal" role="dialog" aria-modal="true">
+            <p className="modal-title">Associate with…</p>
+            <p className="modal-subtitle">Add a link from <strong>{addAssocCtx.focalTitle}</strong></p>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="assoc-search">Search docs</label>
+              <input
+                id="assoc-search"
+                className="modal-input"
+                type="text"
+                placeholder="Filter by title…"
+                value={assocQuery}
+                onChange={(e) => setAssocQuery(e.target.value)}
+                autoFocus
+              />
+              <div className="assoc-list">
+                {assocFilteredDocs.length === 0 ? (
+                  <div className="assoc-list-empty">No docs found</div>
+                ) : assocFilteredDocs.map((d) => (
+                  <div
+                    key={d.path}
+                    className="assoc-item"
+                    data-selected={assocTarget === d.path}
+                    onClick={() => setAssocTarget(d.path)}
+                    role="option"
+                    aria-selected={assocTarget === d.path}
+                  >
+                    <span className="assoc-item-check">
+                      {assocTarget === d.path && (
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                          <path d="M1.5 4L3.5 6L6.5 2" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </span>
+                    {d.title}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-field">
+              <label className="modal-label" htmlFor="assoc-label">Relationship <span style={{ textTransform: "none", fontWeight: 400 }}>(optional)</span></label>
+              <input
+                id="assoc-label"
+                className="modal-input"
+                type="text"
+                placeholder="e.g. collaborated on, mentored by…"
+                value={assocLabel}
+                onChange={(e) => setAssocLabel(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submitAddAssoc()}
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setAddAssocCtx(null)} type="button">Cancel</button>
+              <button
+                className="btn-primary"
+                onClick={submitAddAssoc}
+                disabled={!assocTarget || assocBusy}
+                type="button"
+              >
+                {assocBusy ? "Saving…" : "Associate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteCtx && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDeleteCtx(null)}>
+          <div className="modal" role="dialog" aria-modal="true">
+            <p className="modal-title">Delete doc?</p>
+            <p className="modal-subtitle">
+              <strong>{deleteCtx.focalTitle}</strong> will be permanently deleted. This can be reverted from History.
+            </p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setDeleteCtx(null)} type="button">Cancel</button>
+              <button
+                className="btn-destructive"
+                onClick={submitDeleteNode}
+                disabled={deleteBusy}
+                type="button"
+              >
+                {deleteBusy ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict resolution modal */}
+      {conflictModalOpen && conflicts.length > 0 && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setConflictModalOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true">
+            <p className="modal-title">Sync conflicts</p>
+            <p className="modal-subtitle">Both sides were changed. Choose which version to keep for each file.</p>
+            <div className="conflict-panel" style={{ marginTop: 12 }}>
+              <div className="conflict-header">
+                <span>Conflicts — both sides changed</span>
+                <button className="conflict-force-btn" onClick={() => { handleSync(true); setConflictModalOpen(false); }} type="button">
+                  Keep all local
+                </button>
+              </div>
+              {conflicts.map((c) => (
+                <div key={c.path} className="conflict-row">
+                  <span className="conflict-path" title={c.path}>{c.path}</span>
+                  <div className="conflict-actions">
+                    <button
+                      className="conflict-btn"
+                      onClick={() => handleResolve(c.path, "keep-local")}
+                      disabled={resolvingPath === c.path}
+                      type="button"
+                    >Mine</button>
+                    <button
+                      className="conflict-btn"
+                      onClick={() => handleResolve(c.path, "keep-cloud")}
+                      disabled={resolvingPath === c.path}
+                      type="button"
+                    >Cloud</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setConflictModalOpen(false)} type="button">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(ts).toLocaleDateString();
 }
 
 function labelFor(s: SaveState): string {

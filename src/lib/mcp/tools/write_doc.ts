@@ -1,5 +1,5 @@
-import { validatePath, writeVaultFile } from "./vault.js";
-import type { ToolContext } from "./types.js";
+import { validatePath, writeVaultFile } from "./vault";
+import type { ToolContext } from "./types";
 
 export async function writeDoc(ctx: ToolContext, args: Record<string, unknown>): Promise<unknown> {
   const rel = String(args.path);

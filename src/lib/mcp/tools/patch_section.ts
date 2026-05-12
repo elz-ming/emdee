@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { validatePath, readVaultFile, writeVaultFile } from "./vault.js";
-import type { ToolContext } from "./types.js";
+import { validatePath, readVaultFile, writeVaultFile } from "./vault";
+import type { ToolContext } from "./types";
 
 function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };

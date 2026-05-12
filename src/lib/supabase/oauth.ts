@@ -1,4 +1,4 @@
-import { adminClient, hashToken } from "./admin.js";
+import { adminClient, hashToken } from "./admin";
 
 const TOKEN_TTL_DAYS = 30;
 const CODE_TTL_MINUTES = 10;

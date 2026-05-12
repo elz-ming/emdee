@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { buildIndex, buildIndexFromContents, type DocIndex } from "../../../core/indexer.js";
-import type { ToolContext } from "./types.js";
+import { buildIndex, buildIndexFromContents, type DocIndex } from "../../../core/indexer";
+import type { ToolContext } from "./types";
 
 export function validatePath(rel: string): void {
   if (!rel || rel.includes("..")) throw new Error("invalid path");

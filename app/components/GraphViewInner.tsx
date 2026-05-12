@@ -7,6 +7,9 @@ export interface Props {
   index: DocIndex;
   activePath: string | null;
   onSelect: (path: string) => void;
+  onAddChild?: (focalPath: string, focalTitle: string) => void;
+  onAddAssociation?: (focalPath: string, focalTitle: string) => void;
+  onDeleteNode?: (focalPath: string, focalTitle: string) => void;
 }
 
 const PAGE_SIZE = 8;
@@ -343,7 +346,7 @@ function syncGraph(
   }
 }
 
-export function GraphViewInner({ index, activePath, onSelect }: Props) {
+export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddAssociation, onDeleteNode }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const focalIdRef = useRef<string | null>(null);
@@ -589,6 +592,15 @@ export function GraphViewInner({ index, activePath, onSelect }: Props) {
         <button onClick={goBack} disabled={history.length === 0}>← Back</button>
         <span className="graph-focal">Focus: <strong>{focalDoc.title}</strong></span>
         <button onClick={() => onSelect(focalId!)}>Open doc</button>
+        {onAddChild && (
+          <button className="btn-action" onClick={() => onAddChild(focalId!, focalDoc.title)}>+ Child</button>
+        )}
+        {onAddAssociation && (
+          <button className="btn-action" onClick={() => onAddAssociation(focalId!, focalDoc.title)}>Associate</button>
+        )}
+        {onDeleteNode && (
+          <button className="btn-danger" onClick={() => onDeleteNode(focalId!, focalDoc.title)}>Delete</button>
+        )}
         <span className="legend">
           {(["projects", "people", "hackathons", "education", "career", "vault"] as Category[]).map((c) => (
             <span key={c} className="legend-item">

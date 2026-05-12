@@ -22,3 +22,4 @@ supabase/.temp/
 # Private knowledge — the structure is in templates/, the contents are yours
 docs/
 !docs/.gitkeep
+tsconfig.tsbuildinfo
