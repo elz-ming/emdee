@@ -16,6 +16,9 @@ next-env.d.ts
 # Claude Code agent workspaces
 .claude/
 
+# Supabase CLI temp files (version snapshots, pooler URL, etc.)
+supabase/.temp/
+
 # Private knowledge — the structure is in templates/, the contents are yours
 docs/
 !docs/.gitkeep

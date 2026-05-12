@@ -20,7 +20,10 @@
     "src/mcp"
   ],
   "dependencies": {
+    "@clerk/nextjs": "^7.3.3",
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.105.4",
     "@toast-ui/editor": "^3.2.2",
     "@vercel/blob": "^2.3.3",
     "commander": "^12.1.0",

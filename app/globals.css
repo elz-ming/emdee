@@ -17,16 +17,47 @@ body {
   color: var(--fg);
 }
 
-.app { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+.app { display: flex; height: 100%; }
+
+.sidebar-wrap { display: flex; flex-shrink: 0; }
 
 .sidebar {
+  width: 260px;
   background: var(--panel);
   border-right: 1px solid var(--border);
   padding: 20px 16px;
   overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.25s ease, padding 0.25s ease, border-color 0.25s ease;
+  flex-shrink: 0;
 }
-.sidebar h1 { font-size: 16px; margin: 0 0 16px; letter-spacing: 0.5px; }
-.sidebar nav { display: flex; gap: 8px; margin-bottom: 16px; }
+.sidebar[data-collapsed="true"] {
+  width: 0;
+  padding: 0;
+  border-color: transparent;
+}
+.sidebar h1 { font-size: 14px; font-weight: 700; margin: 0 0 16px; letter-spacing: 1.5px; white-space: nowrap; }
+
+.sidebar-rail {
+  width: 16px;
+  background: var(--panel);
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 22px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.sidebar-rail:hover { background: var(--accent-soft); color: var(--accent); }
+
+.sidebar nav { display: flex; gap: 8px; margin-bottom: 12px; white-space: nowrap; }
 .sidebar nav button,
 .doc-list button {
   background: transparent;
@@ -186,6 +217,8 @@ body {
 .tree-hline:hover::before { background: var(--accent); }
 
 .content {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -225,8 +258,12 @@ body {
 .editor-host [data-mode="rendered"] .toastui-editor-toolbar,
 .editor-host [data-mode="rendered"] .toastui-editor-md-splitter,
 .editor-host [data-mode="rendered"] .toastui-editor-md-container .toastui-editor { display: none !important; }
+.editor-host [data-mode="rendered"] .toastui-editor-defaultUI,
+.editor-host [data-mode="rendered"] .toastui-editor-main,
+.editor-host [data-mode="rendered"] .toastui-editor-md-container { width: 100% !important; max-width: none !important; }
 .editor-host [data-mode="rendered"] .toastui-editor-md-preview {
   width: 100% !important;
+  max-width: none !important;
   border-left: none !important;
   padding: 20px 24px !important;
 }
@@ -240,6 +277,43 @@ body {
 .wiki-link { cursor: pointer; text-decoration: underline dotted; }
 
 .empty { padding: 32px; color: var(--muted); }
+
+.pat-section {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pat-label { font-size: 11px; font-weight: 600; letter-spacing: 0.8px; color: var(--muted); text-transform: uppercase; }
+.pat-value {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pat-actions { display: flex; gap: 6px; }
+.pat-btn {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.pat-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 .graph-wrap { display: flex; flex-direction: column; height: 100%; }
 .graph-bar {
