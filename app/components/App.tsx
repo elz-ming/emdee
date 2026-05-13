@@ -699,7 +699,7 @@ export function App({ namespace }: { namespace: string }) {
         )}
         {view === "doc" && !activeDoc && (
           <div className="empty">
-            <p>No docs found. Run <code>mane init</code> in a directory to get started.</p>
+            <p>No docs found. Run <code>emdee init</code> in a directory to get started.</p>
           </div>
         )}
         {view === "graph" && index && (
