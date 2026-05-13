@@ -40,7 +40,8 @@ export async function GET(request: Request) {
   // Cloud: read from Vercel Blob under the given namespace prefix
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   if (!token) {
-    return Response.json({ docs: [], edges: [], entry: null }, { headers: { "Cache-Control": "no-store" } });
+    const envKeys = Object.keys(process.env).filter(k => k.includes("BLOB") || k.includes("TOKEN")).join(",");
+    return Response.json({ docs: [], edges: [], entry: null, _debug: `no token; blob-related keys: ${envKeys || "none"}` }, { headers: { "Cache-Control": "no-store" } });
   }
 
   const prefix = ns.endsWith("/") ? ns : `${ns}/`;
