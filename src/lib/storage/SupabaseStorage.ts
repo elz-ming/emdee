@@ -1,5 +1,5 @@
 import { adminClient } from "@/src/lib/supabase/admin";
-import type { VaultFile, VaultStorage } from "./VaultStorage.ts";
+import type { VaultFile, VaultStorage } from "./VaultStorage";
 
 const BUCKET = "vaults";
 

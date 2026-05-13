@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import cytoscape from "cytoscape";
-import type { DocIndex, Edge } from "@/src/web/types";
+import type { DocIndex, Edge } from "@/src/core/indexer";
 
 export interface Props {
   index: DocIndex;

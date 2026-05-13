@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { GraphView } from "./GraphView";
 import { DocEditor } from "./DocEditor";
-import type { DocIndex, DocNode } from "@/src/web/types";
+import type { DocIndex, DocNode } from "@/src/core/indexer";
 import { useDocsChanged } from "./useDocsChanged";
 import { useDocLog } from "./useDocLog";
 

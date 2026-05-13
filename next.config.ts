@@ -1,15 +1,11 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
-const config: NextConfig = {
-  // Allow @toast-ui/editor and cytoscape to load in client components
+const nextConfig: NextConfig = {
   transpilePackages: ["@toast-ui/editor"],
-  // Disable webpack persistent cache — Next.js 15 + Vercel build cache combo
-  // serves stale route handlers across deploys. Upgrade to Next 16 (Turbopack)
-  // to remove this workaround.
-  webpack: (config) => {
-    config.cache = false;
-    return config;
+  turbopack: {
+    root: path.resolve(import.meta.dirname),
   },
 };
 
-export default config;
+export default nextConfig;
