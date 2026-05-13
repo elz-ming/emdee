@@ -1,7 +1,12 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { Editor } from "@toast-ui/editor";
+import * as ToastEditor from "@toast-ui/editor";
 import "@toast-ui/editor/dist/toastui-editor.css";
+
+type EditorInstance = import("@toast-ui/editor").Editor;
+// Turbopack drops named/default toast-ui imports during minification.
+// Resolve the constructor off the namespace at runtime instead.
+const Editor: typeof import("@toast-ui/editor").Editor = ToastEditor.Editor;
 
 export interface Props {
   path: string;
@@ -13,7 +18,7 @@ export interface Props {
 
 export function DocEditorInner({ path, initialContent, mode, onChange, onWikiLinkClick }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<Editor | null>(null);
+  const editorRef = useRef<EditorInstance | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onWikiLinkClickRef = useRef(onWikiLinkClick);
