@@ -336,6 +336,10 @@ export function App({ namespace }: { namespace: string }) {
     });
   }, []);
 
+  // Authenticated users get sticky focus across reloads — public visitors
+  // always land on the entry doc (INFO) so the intro experience is consistent.
+  const focusKey = isOwnNamespace ? `emdee_focus_${namespace}` : null;
+
   const loadIndex = useCallback(async (preserveActive: boolean) => {
     try {
       const res = await fetch(`/api/index?ns=${encodeURIComponent(namespace)}`, { cache: "no-store" });
@@ -346,12 +350,23 @@ export function App({ namespace }: { namespace: string }) {
         if (preserveActive && current && data.docs.some((d) => d.path === current)) {
           return current;
         }
+        if (focusKey) {
+          const stored = localStorage.getItem(focusKey);
+          if (stored && data.docs.some((d) => d.path === stored)) return stored;
+        }
         return data.entry ?? data.docs?.[0]?.path ?? null;
       });
     } catch {
       setIndex({ docs: [], edges: [], entry: null });
     }
-  }, [namespace]);
+  }, [namespace, focusKey]);
+
+  // Persist the focused doc for authenticated users so a refresh lands them
+  // back where they left off.
+  useEffect(() => {
+    if (!focusKey || !activePath) return;
+    localStorage.setItem(focusKey, activePath);
+  }, [focusKey, activePath]);
 
   useEffect(() => {
     loadIndex(false);
