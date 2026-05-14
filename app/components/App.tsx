@@ -336,9 +336,11 @@ export function App({ namespace }: { namespace: string }) {
     });
   }, []);
 
-  // Authenticated users get sticky focus across reloads — public visitors
+  // Personal namespaces get sticky focus across reloads — public visitors
   // always land on the entry doc (INFO) so the intro experience is consistent.
-  const focusKey = isOwnNamespace ? `emdee_focus_${namespace}` : null;
+  // Keyed by namespace alone so we don't have to wait for Clerk hydration;
+  // the focus state is just UI, not sensitive content.
+  const focusKey = namespace !== "public" ? `emdee_focus_${namespace}` : null;
 
   const loadIndex = useCallback(async (preserveActive: boolean) => {
     try {
