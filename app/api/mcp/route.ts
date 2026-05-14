@@ -11,13 +11,29 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// Browser-side MCP clients (claude.ai's tool widget) hit this endpoint from a
+// different origin, so every response needs CORS headers and OPTIONS preflights
+// must succeed before the real request is sent.
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "authorization, content-type, mcp-protocol-version, mcp-session-id",
+  "Access-Control-Expose-Headers": "mcp-session-id, www-authenticate",
+  "Access-Control-Max-Age": "86400",
+};
+
+function withCors(response: Response): Response {
+  for (const [k, v] of Object.entries(CORS_HEADERS)) response.headers.set(k, v);
+  return response;
+}
+
 function bearerChallenge(origin: string): Response {
-  return new Response(null, {
+  return withCors(new Response(null, {
     status: 401,
     headers: {
       "WWW-Authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`,
     },
-  });
+  }));
 }
 
 function buildMcpServer(ctx: ToolContext): Server {
@@ -82,7 +98,7 @@ async function handleMcp(request: Request): Promise<Response> {
     const server = buildMcpServer(ctx);
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);
-    return transport.handleRequest(request);
+    return withCors(await transport.handleRequest(request));
   }
 
   // Cloud: require OAuth bearer token
@@ -94,9 +110,12 @@ async function handleMcp(request: Request): Promise<Response> {
   const server = buildMcpServer(ctx);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
-  return transport.handleRequest(request);
+  return withCors(await transport.handleRequest(request));
 }
 
 export const GET = handleMcp;
 export const POST = handleMcp;
 export const DELETE = handleMcp;
+export async function OPTIONS(): Promise<Response> {
+  return new Response(null, { status: 204, headers: CORS_HEADERS });
+}
