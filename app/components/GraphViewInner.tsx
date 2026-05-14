@@ -150,11 +150,21 @@ function placeLayout(
 ): { nodes: PlacedNode[]; edges: PlacedEdge[]; totalLayer1: number } {
   const titleFor = (p: string) => index.docs.find((d) => d.path === p)?.title ?? p;
   const focalTitle = titleFor(focalId);
-  const shortLabel = (p: string) => {
+  // Strip a parent's title prefix from a child label, including any
+  // segmented variants — "PROJECTS — WHATELZ-AI" under parent "PROJECTS"
+  // becomes "WHATELZ-AI". Used for layer-1 (parent = focal) and layer-2
+  // (parent = the layer-1 node above it) so a deep node like
+  // "WHATELZ-AI — BUILD" displays as just "BUILD" beneath its parent.
+  const shortLabelForParent = (parentTitle: string, p: string) => {
     const t = titleFor(p);
-    const prefix = focalTitle + " — ";
-    return t.startsWith(prefix) ? t.slice(prefix.length) : t;
+    const segments = parentTitle.split(" — ");
+    for (let i = segments.length; i > 0; i--) {
+      const prefix = segments.slice(0, i).join(" — ") + " — ";
+      if (t.startsWith(prefix)) return t.slice(prefix.length);
+    }
+    return t;
   };
+  const shortLabel = (p: string) => shortLabelForParent(focalTitle, p);
 
   const allLayer1 = neighborsOf(index, focalId);
   const totalLayer1 = allLayer1.length;
@@ -229,6 +239,7 @@ function placeLayout(
 
   for (const [l1Id, neighbors] of groupedByL1) {
     const baseAngle = layer1AnglesById.get(l1Id)!;
+    const l1Title = titleFor(l1Id);
     neighbors.forEach((n, i) => {
       const offset =
         neighbors.length === 1
@@ -239,7 +250,7 @@ function placeLayout(
       const angle = baseAngle + offset;
       placed.set(n.id, {
         id: n.id,
-        label: shortLabel(n.id),
+        label: shortLabelForParent(l1Title, n.id),
         kind: "layer2",
         category: categoryFor(n.id),
         position: { x: Math.cos(angle) * RADIUS_LAYER2, y: Math.sin(angle) * RADIUS_LAYER2 },
