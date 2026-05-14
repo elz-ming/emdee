@@ -1052,14 +1052,19 @@ body {
     height: auto;
   }
 
-  /* On mobile, stack graph above doc instead of side-by-side */
+  /* On mobile, stack graph above doc and let the page scroll naturally —
+     overflow:hidden + a clipped flex parent would otherwise hide the doc. */
   .main-split {
+    flex: 0 0 auto;
     flex-direction: column;
+    overflow: visible;
   }
   .graph-pane,
   .doc-pane {
     flex: 0 0 auto;
-    min-height: 50svh;
+    height: 60svh;
+    min-height: 60svh;
+    overflow: visible;
   }
   .doc-pane {
     border-left: none;
