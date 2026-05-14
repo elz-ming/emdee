@@ -212,13 +212,20 @@ function placeLayout(
       showLabel: true,
     });
 
-    // Layer-2 rule: never show "Child of" relationships (role === "parent" from
-    // the layer-1's view), and prioritize "Parent of" (role === "child") over
-    // "Associated with" (role === "assoc"). neighborsOf already returns
-    // parent → child → assoc; after filtering parents out, child comes first.
+    // Layer-2 extends lineage in the same direction as the layer-1 hop, so
+    // the picture stays a coherent chain rather than introducing siblings.
+    //  - layer-1 is the focal's parent → layer-2 is its parent (grandparent
+    //    of focal). At 12 o'clock this gives two ancestor levels stacked
+    //    above the focal.
+    //  - layer-1 is a child or associate → layer-2 is its child (one level
+    //    deeper toward the leaves).
+    // Sibling-of-focal nodes (which would appear here if we walked the
+    // "child" side of a parent l1) are deliberately excluded — that was
+    // the bug that put MMI above GBI in image 46.
+    const desiredRole: Role = l1.role === "parent" ? "parent" : "child";
     const candidates = neighborsOf(index, l1.id)
       .filter((n) => !reservedIds.has(n.id))
-      .filter((n) => n.role !== "parent");
+      .filter((n) => n.role === desiredRole);
     let added = 0;
     for (const cand of candidates) {
       if (added >= LAYER2_PER_LAYER1) break;
