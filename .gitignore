@@ -47,6 +47,8 @@ next-env.d.ts
 # Supabase CLI temp files (version snapshots, pooler URL, etc.)
 supabase/.temp/
 
-# Private knowledge — the structure is in templates/, the contents are yours
-docs/
-!docs/.gitkeep
+# Private knowledge — the structure is in templates/, the contents are yours.
+# Anchored to repo root so it doesn't shadow other "docs" directories
+# (e.g. app/api/rest/docs/).
+/docs/
+!/docs/.gitkeep
