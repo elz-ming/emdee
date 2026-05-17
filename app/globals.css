@@ -674,6 +674,30 @@ body[data-resizing-split="true"] {
   position: relative;
   overflow: hidden;
   min-height: 0;
+  /* Container query anchor — lets the bottom-row overlays restack on narrow
+     graph-stage widths (split-pane narrowed, mobile/portrait), independent
+     of viewport size. */
+  container-type: inline-size;
+  container-name: graphstage;
+}
+
+/* When the stage gets too narrow for the three bottom overlays to sit
+   side-by-side without overlapping, stack them in a single column anchored
+   to the bottom-left: zoom (top), pager (middle), breadcrumb (bottom). */
+@container graphstage (max-width: 700px) {
+  .graph-breadcrumb {
+    max-width: calc(100% - 32px);
+  }
+  .graph-pager {
+    bottom: 60px;
+    left: 16px;
+    transform: none;
+  }
+  .zoom-control {
+    bottom: 104px;
+    left: 16px;
+    right: auto;
+  }
 }
 .graph {
   position: absolute;
