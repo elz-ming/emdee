@@ -30,14 +30,16 @@ export interface Props {
 //   slot 1 (10:30) = prev sibling
 //   slot 7 (1:30)  = next sibling
 //
-// Rotatable slots — focal's children/associates. 1st node at 9 o'clock
-// (slot 2), 5th at 3 o'clock (slot 6). Fixed page size of 5.
+// Rotatable slots — focal's children/associates. For a focal with a parent,
+// rotatable occupies the bottom half (slots 2…6) and pages 5 at a time. For
+// a root focal (no parent, hence no siblings), all 8 slots are available
+// and the page size opens up to 8 since there's no lineage to reserve.
 const SLOT_COUNT = 8;
 const PARENT_SLOT = 0;
 const PREV_SIBLING_SLOT = 1;
 const NEXT_SIBLING_SLOT = 7;
-const ROTATABLE_SLOTS = [2, 3, 4, 5, 6];
-const PAGE_SIZE = ROTATABLE_SLOTS.length;
+const ROTATABLE_SLOTS_WITH_PARENT = [2, 3, 4, 5, 6];
+const ROTATABLE_SLOTS_ROOT = [0, 1, 2, 3, 4, 5, 6, 7];
 const LAYER2_PER_LAYER1 = 2;
 const RADIUS_LAYER1 = 240;
 const RADIUS_LAYER2 = 400;
@@ -241,15 +243,16 @@ function placeLayout(
   const prevSiblingId =
     prevPath && index.docs.some((d) => d.path === prevPath) ? prevPath : null;
 
-  // Rotatable nodes always fill the bottom-half slots in the fixed order
-  // ROTATABLE_SLOTS. The lineage slots (parent + siblings) stay reserved —
-  // they remain empty when no parent/sibling exists rather than getting
-  // backfilled by children/associates.
+  // Rotatable nodes fill a fixed list of slot positions in declared order.
+  // With a parent: only the bottom-half slots (lineage slots 0/1/7 stay
+  // reserved). At root: all 8 slots — no lineage to reserve.
+  const rotatableSlots = parent ? ROTATABLE_SLOTS_WITH_PARENT : ROTATABLE_SLOTS_ROOT;
+  const pageSize = rotatableSlots.length;
   const totalRotatable = rotatable.length;
-  const totalPages = Math.max(1, Math.ceil(totalRotatable / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalRotatable / pageSize));
   const safePage = ((page % totalPages) + totalPages) % totalPages;
-  const pageStart = safePage * PAGE_SIZE;
-  const onPage = rotatable.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageStart = safePage * pageSize;
+  const onPage = rotatable.slice(pageStart, pageStart + pageSize);
 
   // Strip the parent prefix from the focal label too — "POKEAI — LOGS"
   // under parent POKEAI reads as just "LOGS". Picks the first declared
@@ -310,10 +313,10 @@ function placeLayout(
     });
   }
 
-  // Rotatable neighbors fill ROTATABLE_SLOTS in declared order — 1st node
-  // at 9 o'clock, 5th at 3 o'clock, anticlockwise across the bottom.
+  // Rotatable neighbors fill the slot list in declared order. Bottom-half
+  // anticlockwise for non-root focals (9 → 3 o'clock); full ring for root.
   onPage.forEach((n, i) => {
-    const slot = ROTATABLE_SLOTS[i];
+    const slot = rotatableSlots[i];
     if (slot === undefined) return;
     const angle = angleForSlot(slot);
     layer1AnglesById.set(n.id, angle);
@@ -439,7 +442,7 @@ function placeLayout(
     });
   }
 
-  return { nodes: [...placed.values()], edges, totalRotatable, pageSize: PAGE_SIZE };
+  return { nodes: [...placed.values()], edges, totalRotatable, pageSize };
 }
 
 function syncGraph(
