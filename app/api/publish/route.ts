@@ -116,16 +116,17 @@ export async function GET() {
   const admin = adminClient();
   const { data: profile } = await admin
     .from("profiles")
-    .select("handle")
+    .select("handle, is_admin")
     .eq("clerk_id", userId)
     .maybeSingle();
   const handle = profile?.handle ?? null;
+  const isAdmin = !!profile?.is_admin;
   const { data: rows } = await admin
     .from("publications")
     .select("id, slug, root_doc_path, included_paths, include_descendants, include_direct_associates, created_at, updated_at")
     .eq("owner_id", userId)
     .order("updated_at", { ascending: false });
-  return Response.json({ handle, publications: rows ?? [] });
+  return Response.json({ handle, is_admin: isAdmin, publications: rows ?? [] });
 }
 
 export async function DELETE(request: Request) {

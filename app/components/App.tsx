@@ -5,6 +5,7 @@ import { GraphView } from "./GraphView";
 import { DocEditor } from "./DocEditor";
 import { ShareModal } from "./ShareModal";
 import { PublishModal } from "./PublishModal";
+import { PublicationsModal } from "./PublicationsModal";
 import type { DocIndex, DocNode } from "@/src/core/indexer";
 import { getPrevNextSiblings } from "@/src/core/siblings";
 import { useDocsChanged } from "./useDocsChanged";
@@ -286,6 +287,8 @@ export function App({ namespace }: { namespace: string }) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [shareCtx, setShareCtx] = useState<GraphModalContext | null>(null);
   const [publishCtx, setPublishCtx] = useState<GraphModalContext | null>(null);
+  const [showPublications, setShowPublications] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [sharedDocs, setSharedDocs] = useState<SharedDoc[]>([]);
   const [renameCtx, setRenameCtx] = useState<GraphModalContext | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
@@ -317,6 +320,21 @@ export function App({ namespace }: { namespace: string }) {
       .catch(() => setSharedDocs([]));
   }, [isOwnNamespace]);
   useEffect(() => { refreshShared(); }, [refreshShared]);
+
+  // is_admin is fetched once on mount for signed-in owners — gates the
+  // Admin link in the sidebar footer. /api/publish GET returns it as a
+  // free byproduct of the profile lookup that already powers the
+  // publications list.
+  useEffect(() => {
+    if (!isOwnNamespace) {
+      setIsAdmin(false);
+      return;
+    }
+    fetch("/api/publish", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setIsAdmin(!!d?.is_admin))
+      .catch(() => setIsAdmin(false));
+  }, [isOwnNamespace]);
 
   // Load the linked cloud userId (set by /cloud-link/callback) and stay in
   // sync if the user re-links in another tab.
@@ -1060,6 +1078,33 @@ export function App({ namespace }: { namespace: string }) {
             onToggle={toggleCollapsed}
           />
           <div className="sidebar-footer">
+            {isOwnNamespace && (
+              <button
+                className="sidebar-footer-btn"
+                onClick={() => { setShowPublications(true); setMobileSidebarOpen(false); }}
+                type="button"
+              >
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                  <path d="M2 3.5C2 2.67157 2.67157 2 3.5 2H7L11 6V9.5C11 10.3284 10.3284 11 9.5 11H3.5C2.67157 11 2 10.3284 2 9.5V3.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                  <path d="M7 2V6H11" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                </svg>
+                Publications
+              </button>
+            )}
+            {isAdmin && (
+              <a
+                className="sidebar-footer-btn"
+                href="/admin/publications"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                  <path d="M6.5 1.5L10.5 3V6.5C10.5 8.5 8.7 10.4 6.5 11C4.3 10.4 2.5 8.5 2.5 6.5V3L6.5 1.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                  <path d="M5 6.5L6 7.5L8.5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Admin
+              </a>
+            )}
             <button
               className="sidebar-footer-btn"
               onClick={() => { setView(view === "log" ? "main" : "log"); setMobileSidebarOpen(false); }}
@@ -1436,6 +1481,9 @@ export function App({ namespace }: { namespace: string }) {
           onClose={() => setPublishCtx(null)}
         />
       )}
+
+      {/* Publications list — owner-side roster of public links */}
+      {showPublications && <PublicationsModal onClose={() => setShowPublications(false)} />}
 
       {/* Conflict resolution modal */}
       {conflictModalOpen && conflicts.length > 0 && (
