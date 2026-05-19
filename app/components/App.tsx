@@ -519,6 +519,34 @@ export function App({ namespace }: { namespace: string }) {
     return index?.docs.find((d) => d.path === activePath) ?? null;
   }, [index, activePath, activeSharedDoc]);
 
+  // Prev/Next sibling derived from the active doc's first declared parent's
+  // `Parent of` order. Mirrors the server-side computation in
+  // src/lib/mcp/tools/get_neighbors.ts so the renderer and any MCP client
+  // see the same sequence. Null when there's no parent, the parent isn't
+  // resolvable, or focal isn't in the parent's bullet list.
+  const { prevSibling, nextSibling } = useMemo<{
+    prevSibling: DocNode | null;
+    nextSibling: DocNode | null;
+  }>(() => {
+    if (!activeDoc || !index || activePath?.startsWith(SHARED_PREFIX)) {
+      return { prevSibling: null, nextSibling: null };
+    }
+    const primaryParent = activeDoc.parents[0];
+    if (!primaryParent) return { prevSibling: null, nextSibling: null };
+    const byTitle = new Map(index.docs.map((d) => [d.title.toLowerCase(), d]));
+    const parentDoc = byTitle.get(primaryParent.title.toLowerCase());
+    if (!parentDoc) return { prevSibling: null, nextSibling: null };
+    const siblings = parentDoc.children
+      .map((l) => byTitle.get(l.title.toLowerCase()))
+      .filter((d): d is DocNode => !!d);
+    const idx = siblings.findIndex((d) => d.path === activeDoc.path);
+    if (idx === -1) return { prevSibling: null, nextSibling: null };
+    return {
+      prevSibling: siblings[idx - 1] ?? null,
+      nextSibling: siblings[idx + 1] ?? null,
+    };
+  }, [activeDoc, activePath, index]);
+
   const rawDocTree = useMemo(
     () => (index ? buildDocTree(index) : []),
     [index]
@@ -621,6 +649,28 @@ export function App({ namespace }: { namespace: string }) {
     setView("main");
     setMobileSidebarOpen(false);
   }, []);
+
+  // Keyboard shortcuts: `[` / `]` jump to prev / next sibling. Skipped when
+  // an input or contentEditable has focus so we don't hijack typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+      }
+      if (e.key === "[" && prevSibling) {
+        e.preventDefault();
+        selectDoc(prevSibling.path);
+      } else if (e.key === "]" && nextSibling) {
+        e.preventDefault();
+        selectDoc(nextSibling.path);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [prevSibling, nextSibling, selectDoc]);
 
   useEffect(() => {
     setSaveState("idle");
@@ -1111,6 +1161,24 @@ export function App({ namespace }: { namespace: string }) {
                       <span className="doc-path">{displayPath}</span>
                       <span className="spacer" />
                       {!isSharedView && <span className="save-state">{labelFor(saveState)}</span>}
+                      <button
+                        className="btn-sibling-nav"
+                        onClick={() => prevSibling && selectDoc(prevSibling.path)}
+                        disabled={!prevSibling}
+                        type="button"
+                        title={prevSibling ? `← ${prevSibling.title}  [` : "No previous sibling  ["}
+                      >
+                        ← Prev
+                      </button>
+                      <button
+                        className="btn-sibling-nav"
+                        onClick={() => nextSibling && selectDoc(nextSibling.path)}
+                        disabled={!nextSibling}
+                        type="button"
+                        title={nextSibling ? `${nextSibling.title} →  ]` : "No next sibling  ]"}
+                      >
+                        Next →
+                      </button>
                       <button className="btn-export-pdf" onClick={exportPdf} type="button" title="Export as PDF">
                         Export PDF
                       </button>

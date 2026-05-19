@@ -1431,3 +1431,16 @@ body[data-resizing-split="true"] {
   margin-left: 6px;
 }
 .btn-export-pdf:hover { background: var(--bg); border-color: var(--accent); color: var(--accent); }
+
+.btn-sibling-nav {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  border-radius: 5px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.btn-sibling-nav:hover:not(:disabled) { background: var(--bg); border-color: var(--accent); color: var(--accent); }
+.btn-sibling-nav:disabled { opacity: 0.35; cursor: not-allowed; }
