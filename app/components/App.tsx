@@ -774,16 +774,24 @@ export function App({ namespace }: { namespace: string }) {
   // Copy a ready-made LLM prompt that points Claude/ChatGPT at this doc
   // via the EMDEE MCP. Ends with "Then:" + blank lines so the cursor
   // lands where the user types their actual request.
+  //
+  // When the focal is a doc shared INTO this vault (subscriber side),
+  // the MCP serves it at __shared__/<ownerId>/<owner-side-path>. Using
+  // that path in the prompt lets the recipient's LLM read collaborator
+  // content the same way as their own docs.
   const copyLlmPrompt = useCallback(() => {
     if (!activeDoc) return;
+    const pathForPrompt = activeSharedDoc
+      ? `__shared__/${activeSharedDoc.ownerId}/${activeSharedDoc.path}`
+      : activeDoc.path;
     const prompt =
-      `Use the EMDEE MCP to load ${activeDoc.path} and its directly related nodes ` +
+      `Use the EMDEE MCP to load ${pathForPrompt} and its directly related nodes ` +
       `(parents, children, associates) so you have the full context.\n\nThen:\n\n`;
     navigator.clipboard.writeText(prompt).then(() => {
       setLlmPromptCopied(true);
       window.setTimeout(() => setLlmPromptCopied(false), 2000);
     });
-  }, [activeDoc]);
+  }, [activeDoc, activeSharedDoc]);
 
   const handleEdit = useCallback((next: string) => {
     if (!activePath) return;
@@ -1124,26 +1132,26 @@ export function App({ namespace }: { namespace: string }) {
                         Export PDF
                       </button>
                     </div>
-                    {!isSharedView && (
-                      <div className="llm-prompt-bar">
-                        <span className="llm-prompt-hint">
-                          Use this doc as context in Claude or ChatGPT
-                        </span>
-                        <button
-                          type="button"
-                          className="llm-prompt-copy"
-                          onClick={copyLlmPrompt}
-                          title="Copy a ready-made prompt that loads this doc + its neighbors via the EMDEE MCP"
-                          data-copied={llmPromptCopied ? "true" : undefined}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <rect x="4" y="4" width="9" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
-                            <path d="M7 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                          </svg>
-                          {llmPromptCopied ? "Copied" : "Copy LLM prompt"}
-                        </button>
-                      </div>
-                    )}
+                    <div className="llm-prompt-bar">
+                      <span className="llm-prompt-hint">
+                        {isSharedDoc
+                          ? "Use this shared doc as context in Claude or ChatGPT"
+                          : "Use this doc as context in Claude or ChatGPT"}
+                      </span>
+                      <button
+                        type="button"
+                        className="llm-prompt-copy"
+                        onClick={copyLlmPrompt}
+                        title="Copy a ready-made prompt that loads this doc + its neighbors via the EMDEE MCP"
+                        data-copied={llmPromptCopied ? "true" : undefined}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <rect x="4" y="4" width="9" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+                          <path d="M7 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                        </svg>
+                        {llmPromptCopied ? "Copied" : "Copy LLM prompt"}
+                      </button>
+                    </div>
                     <div className="editor-host">
                       <DocEditor
                         path={isSharedDoc ? `${activeSharedDoc.ownerId}:${activeDoc.path}` : activeDoc.path}
