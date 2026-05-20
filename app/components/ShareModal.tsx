@@ -294,22 +294,34 @@ export function ShareModal({ path, title, index, onClose }: Props) {
           Share <strong>{title}</strong> with others by email, or open it to the public web.
         </p>
 
-        {/* Public-share toggle block */}
+        {/* Public-share toggle block. Visual state is *optimistic* — during
+            the publish/unpublish round-trip (~1–2s loading the vault on
+            the server) the toggle slides immediately to its target state
+            with a busy stripe, then reconciles with the server response. */}
         <div className={`share-public ${isPublic ? "is-on" : ""}`}>
           <div className="share-public-head">
             <div className="share-public-text">
-              <div className="share-public-title">Share to public</div>
+              <div className="share-public-title">
+                Share to public
+                {publishBusy && (
+                  <span className="share-public-spinner" aria-label="Working…" />
+                )}
+              </div>
               <div className="share-public-sub">
-                {isPublic
+                {publishBusy
+                  ? isPublic
+                    ? "Stopping…"
+                    : "Publishing…"
+                  : isPublic
                   ? "Anyone with the link can read. Search engines may index it."
                   : "Off — only people you add by email can access."}
               </div>
             </div>
             <button
               type="button"
-              className={`share-toggle ${isPublic ? "on" : ""}`}
+              className={`share-toggle ${(publishBusy ? !isPublic : isPublic) ? "on" : ""} ${publishBusy ? "is-busy" : ""}`}
               role="switch"
-              aria-checked={isPublic}
+              aria-checked={publishBusy ? !isPublic : isPublic}
               disabled={publishBusy || handleMissing}
               onClick={() => (isPublic ? disablePublic() : publishPublic())}
             >

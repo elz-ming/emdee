@@ -59,31 +59,45 @@ export async function POST(request: Request) {
     return Response.json({ error: "handle_not_set" }, { status: 400 });
   }
 
-  // Load the owner's vault, build index, compute the included path set.
+  // Two paths here, optimized so the common (tree-picker) case avoids
+  // downloading every doc + rebuilding the index server-side.
+  //
+  //  Fast path (modern, ~200ms): client sent explicit included_paths.
+  //    Only need to verify paths exist in storage → list() returns names
+  //    without content.
+  //
+  //  Legacy path (~1–2s on large vaults): client sent only flags. Need
+  //    the full content + index to walk descendants/associates.
   const { storage, prefix } = getVaultStorage(userId);
-  const listed = await storage.listWithContent(prefix || undefined);
-  const files = listed.map((f) => ({
-    path: prefix ? f.path.slice(prefix.length) : f.path,
-    content: f.content,
-  }));
-  const index = buildIndexFromContents(files);
+  const explicit = Array.isArray(body.included_paths) && body.included_paths.length > 0;
 
-  if (!index.docs.some((d) => d.path === rootPath)) {
-    return Response.json({ error: "root_not_in_vault" }, { status: 400 });
+  let computed: string[];
+  if (explicit) {
+    const listed = await storage.list(prefix || undefined);
+    const existing = new Set(
+      listed.map((f) => (prefix ? f.path.slice(prefix.length) : f.path))
+    );
+    if (!existing.has(rootPath)) {
+      return Response.json({ error: "root_not_in_vault" }, { status: 400 });
+    }
+    computed = Array.from(
+      new Set([rootPath, ...body.included_paths!.filter((p) => existing.has(p))])
+    );
+  } else {
+    const listed = await storage.listWithContent(prefix || undefined);
+    const files = listed.map((f) => ({
+      path: prefix ? f.path.slice(prefix.length) : f.path,
+      content: f.content,
+    }));
+    const index = buildIndexFromContents(files);
+    if (!index.docs.some((d) => d.path === rootPath)) {
+      return Response.json({ error: "root_not_in_vault" }, { status: 400 });
+    }
+    computed = computeIncludedPaths(index, rootPath, {
+      includeDescendants: !!body.include_descendants,
+      includeDirectAssociates: !!body.include_direct_associates,
+    });
   }
-
-  // If the client supplies an explicit included_paths array (from the
-  // tree picker), trust it verbatim — filtered to paths that actually
-  // exist in the vault. Always force the root in. This is the modern
-  // path. Legacy clients without included_paths fall through to the
-  // flag-driven walker.
-  const existing = new Set(index.docs.map((d) => d.path));
-  const computed = Array.isArray(body.included_paths) && body.included_paths.length > 0
-    ? Array.from(new Set([rootPath, ...body.included_paths.filter((p) => existing.has(p))]))
-    : computeIncludedPaths(index, rootPath, {
-        includeDescendants: !!body.include_descendants,
-        includeDirectAssociates: !!body.include_direct_associates,
-      });
 
   // Upsert: same (owner, slug) replaces. Lets the owner re-publish to refresh
   // the included set without going through a delete+create dance.

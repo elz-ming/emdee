@@ -1062,8 +1062,34 @@ body[data-resizing-split="true"] {
   transition: background 120ms ease;
   flex-shrink: 0;
 }
-.share-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+.share-toggle:disabled { opacity: 0.6; cursor: progress; }
 .share-toggle.on { background: var(--accent); }
+.share-toggle.is-busy {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.25) 0 6px,
+    transparent 6px 12px
+  );
+  animation: share-toggle-stripe 800ms linear infinite;
+}
+@keyframes share-toggle-stripe {
+  from { background-position: 0 0; }
+  to { background-position: 17px 0; }
+}
+.share-public-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-left: 8px;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: share-public-spin 700ms linear infinite;
+  vertical-align: -1px;
+}
+@keyframes share-public-spin {
+  to { transform: rotate(360deg); }
+}
 .share-toggle-knob {
   position: absolute;
   top: 2px;
