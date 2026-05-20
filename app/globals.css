@@ -843,6 +843,7 @@ body[data-resizing-split="true"] {
 }
 .graph-bar .btn-icon:hover { color: var(--fg); background: var(--bg); }
 .graph-bar .btn-icon-share:hover { color: var(--accent); border-color: var(--accent); }
+.graph-bar .btn-icon-download:hover { color: var(--accent); border-color: var(--accent); }
 .graph-bar .btn-icon-danger:hover { color: #fff; background: #ef4444; border-color: #ef4444; }
 
 .zoom-control {

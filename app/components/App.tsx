@@ -4,6 +4,7 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { GraphView } from "./GraphView";
 import { DocEditor } from "./DocEditor";
 import { ShareModal } from "./ShareModal";
+import { DownloadModal } from "./DownloadModal";
 import { DocTree, buildDocTree, type TreeNode } from "./DocTree";
 import type { DocIndex, DocNode } from "@/src/core/indexer";
 import { getPrevNextSiblings } from "@/src/core/siblings";
@@ -124,6 +125,7 @@ export function App({ namespace }: { namespace: string }) {
   const [deleteCtx, setDeleteCtx] = useState<GraphModalContext | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [shareCtx, setShareCtx] = useState<GraphModalContext | null>(null);
+  const [downloadCtx, setDownloadCtx] = useState<GraphModalContext | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [sharedDocs, setSharedDocs] = useState<SharedDoc[]>([]);
   const [renameCtx, setRenameCtx] = useState<GraphModalContext | null>(null);
@@ -586,6 +588,10 @@ export function App({ namespace }: { namespace: string }) {
     setShareCtx({ focalPath, focalTitle });
   }, []);
 
+  const openDownloadNode = useCallback((focalPath: string, focalTitle: string) => {
+    setDownloadCtx({ focalPath, focalTitle });
+  }, []);
+
   const openRenameNode = useCallback((focalPath: string, focalTitle: string) => {
     setRenameCtx({ focalPath, focalTitle });
     setRenameTitle(focalTitle);
@@ -1037,6 +1043,7 @@ export function App({ namespace }: { namespace: string }) {
                   onAddAssociation={isOwnNamespace ? openAddAssoc : undefined}
                   onDeleteNode={isOwnNamespace ? openDeleteNode : undefined}
                   onShareNode={isOwnNamespace ? openShareNode : undefined}
+                  onDownloadNode={isOwnNamespace ? openDownloadNode : undefined}
                   onRenameNode={isOwnNamespace ? openRenameNode : undefined}
                   prevSibling={prevSibling}
                   nextSibling={nextSibling}
@@ -1406,6 +1413,16 @@ export function App({ namespace }: { namespace: string }) {
           title={shareCtx.focalTitle}
           index={index}
           onClose={() => { setShareCtx(null); refreshShared(); }}
+        />
+      )}
+
+      {/* Download modal */}
+      {downloadCtx && (
+        <DownloadModal
+          path={downloadCtx.focalPath}
+          title={downloadCtx.focalTitle}
+          index={index}
+          onClose={() => setDownloadCtx(null)}
         />
       )}
 

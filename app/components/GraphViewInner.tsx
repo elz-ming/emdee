@@ -12,6 +12,7 @@ export interface Props {
   onAddAssociation?: (focalPath: string, focalTitle: string) => void;
   onDeleteNode?: (focalPath: string, focalTitle: string) => void;
   onShareNode?: (focalPath: string, focalTitle: string) => void;
+  onDownloadNode?: (focalPath: string, focalTitle: string) => void;
   onRenameNode?: (focalPath: string, focalTitle: string) => void;
   // Prev/next sibling for the active doc — computed in App so the doc-pane
   // toolbar and the graph-pane controls stay in lockstep. When the user
@@ -626,7 +627,7 @@ function syncGraph(
   }
 }
 
-export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddAssociation, onDeleteNode, onShareNode, onRenameNode, prevSibling, nextSibling, forceBranchLayout }: Props) {
+export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddAssociation, onDeleteNode, onShareNode, onDownloadNode, onRenameNode, prevSibling, nextSibling, forceBranchLayout }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const focalIdRef = useRef<string | null>(null);
@@ -979,6 +980,21 @@ export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddA
               <circle cx="10.8" cy="11" r="1.7" stroke="currentColor" strokeWidth="1.2"/>
               <line x1="4.6" y1="6.3" x2="9.4" y2="3.9" stroke="currentColor" strokeWidth="1.2"/>
               <line x1="4.6" y1="7.7" x2="9.4" y2="10.1" stroke="currentColor" strokeWidth="1.2"/>
+            </svg>
+          </button>
+        )}
+        {onDownloadNode && (
+          <button
+            className="btn-icon btn-icon-download"
+            onClick={() => onDownloadNode(focalId!, focalDoc.title)}
+            aria-label="Download zip"
+            title="Download zip"
+            type="button"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <path d="M7 1.6V9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              <path d="M3.6 6.2L7 9.4L10.4 6.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2.4 11.4H11.6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
             </svg>
           </button>
         )}
