@@ -8,6 +8,7 @@ import { DocTree, buildDocTree, type TreeNode } from "./DocTree";
 import type { DocIndex, DocNode } from "@/src/core/indexer";
 import { getPrevNextSiblings } from "@/src/core/siblings";
 import { resolveWikiLink } from "@/src/core/resolveLink";
+import { useDrawerDrag } from "./useDrawerDrag";
 import { useDocsChanged } from "./useDocsChanged";
 import { useDocLog } from "./useDocLog";
 
@@ -78,6 +79,12 @@ export function App({ namespace }: { namespace: string }) {
   // → peek so the user never needs two taps to see the content.
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawerState, setMobileDrawerState] = useState<"closed" | "peek" | "full">("closed");
+  const docPaneRef = useRef<HTMLDivElement | null>(null);
+  const drawerDrag = useDrawerDrag({
+    drawerRef: docPaneRef,
+    state: mobileDrawerState,
+    setState: setMobileDrawerState,
+  });
   const [canSync, setCanSync] = useState(false);
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
@@ -1021,7 +1028,7 @@ export function App({ namespace }: { namespace: string }) {
               aria-orientation="vertical"
               aria-label="Resize panes"
             />
-            <div className="doc-pane">
+            <div className="doc-pane" ref={docPaneRef}>
               <button
                 className="graph-collapse-toggle"
                 onClick={toggleGraphCollapsed}
@@ -1030,22 +1037,20 @@ export function App({ namespace }: { namespace: string }) {
               >
                 {graphCollapsed ? "▼ Show graph" : "▲ Hide graph"}
               </button>
-              {/* Mobile drawer header — only renders on mobile. Shows a drag
-                  handle (cycle full → peek → closed), the focused title,
-                  and a close (×) button. */}
-              <div className="mobile-drawer-header" aria-hidden={!isMobile}>
-                <button
-                  type="button"
-                  className="mobile-drawer-handle"
-                  onClick={() =>
-                    setMobileDrawerState((s) =>
-                      s === "full" ? "peek" : s === "peek" ? "closed" : "closed"
-                    )
-                  }
-                  aria-label="Lower drawer"
-                >
+              {/* Mobile drawer header — drag to flick between closed / peek /
+                  full. The × button still works as an explicit close. The
+                  whole bar is the drag target except the close button. */}
+              <div
+                className="mobile-drawer-header"
+                aria-hidden={!isMobile}
+                onPointerDown={drawerDrag.onPointerDown}
+                onPointerMove={drawerDrag.onPointerMove}
+                onPointerUp={drawerDrag.onPointerUp}
+                onPointerCancel={drawerDrag.onPointerUp}
+              >
+                <span className="mobile-drawer-handle" aria-hidden="true">
                   <span className="mobile-drawer-handle-bar" />
-                </button>
+                </span>
                 <div className="mobile-drawer-title">
                   {activeDoc?.title ?? "Doc"}
                 </div>

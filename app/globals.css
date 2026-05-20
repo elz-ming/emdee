@@ -1689,7 +1689,10 @@ a.sidebar-footer-btn { text-decoration: none; }
     transform: translateY(0);
   }
 
-  /* Drawer header (drag bar + title + close button). */
+  /* Drawer header — drag region for swipe/flick gestures.
+     touch-action: none stops the browser from claiming the vertical
+     gesture for page-scroll, which would prevent our drag from
+     running on Android Chrome. */
   .mobile-drawer-header {
     display: flex;
     align-items: center;
@@ -1699,7 +1702,11 @@ a.sidebar-footer-btn { text-decoration: none; }
     background: var(--panel);
     flex-shrink: 0;
     position: relative;
+    touch-action: none;
+    cursor: grab;
+    user-select: none;
   }
+  .mobile-drawer-header:active { cursor: grabbing; }
   .mobile-drawer-handle {
     position: absolute;
     top: 0;
@@ -1707,14 +1714,10 @@ a.sidebar-footer-btn { text-decoration: none; }
     transform: translateX(-50%);
     width: 80px;
     height: 18px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    -webkit-tap-highlight-color: transparent;
+    pointer-events: none;
   }
   .mobile-drawer-handle-bar {
     width: 44px;

@@ -7,6 +7,7 @@ import { DocTree, buildDocTree } from "./DocTree";
 import type { DocIndex, DocNode } from "@/src/core/indexer";
 import { getPrevNextSiblings } from "@/src/core/siblings";
 import { resolveWikiLink } from "@/src/core/resolveLink";
+import { useDrawerDrag } from "./useDrawerDrag";
 
 interface Publication {
   id: string;
@@ -38,6 +39,12 @@ export function PublicShareView({ publication, index, isSignedIn }: Props) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawerState, setMobileDrawerState] = useState<"closed" | "peek" | "full">("closed");
+  const docPaneRef = useRef<HTMLDivElement | null>(null);
+  const drawerDrag = useDrawerDrag({
+    drawerRef: docPaneRef,
+    state: mobileDrawerState,
+    setState: setMobileDrawerState,
+  });
   const viewLoggedRef = useRef(false);
 
   useEffect(() => {
@@ -273,21 +280,19 @@ export function PublicShareView({ publication, index, isSignedIn }: Props) {
             />
           </div>
           <div className="split-divider" role="separator" aria-orientation="vertical" />
-          <div className="doc-pane">
-            {/* Mobile drawer header */}
-            <div className="mobile-drawer-header" aria-hidden={!isMobile}>
-              <button
-                type="button"
-                className="mobile-drawer-handle"
-                onClick={() =>
-                  setMobileDrawerState((s) =>
-                    s === "full" ? "peek" : s === "peek" ? "closed" : "closed"
-                  )
-                }
-                aria-label="Lower drawer"
-              >
+          <div className="doc-pane" ref={docPaneRef}>
+            {/* Mobile drawer header — drag to flick between snap points */}
+            <div
+              className="mobile-drawer-header"
+              aria-hidden={!isMobile}
+              onPointerDown={drawerDrag.onPointerDown}
+              onPointerMove={drawerDrag.onPointerMove}
+              onPointerUp={drawerDrag.onPointerUp}
+              onPointerCancel={drawerDrag.onPointerUp}
+            >
+              <span className="mobile-drawer-handle" aria-hidden="true">
                 <span className="mobile-drawer-handle-bar" />
-              </button>
+              </span>
               <div className="mobile-drawer-title">{activeDoc?.title ?? "Doc"}</div>
               <button
                 type="button"
