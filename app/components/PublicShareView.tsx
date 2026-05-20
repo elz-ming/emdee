@@ -147,6 +147,33 @@ export function PublicShareView({ publication, index, isSignedIn }: Props) {
     );
   }, [logEvent]);
 
+  // Direct PDF download via html2pdf.js (same library + options as the
+  // owner-side Export PDF). Targets the rendered preview DOM.
+  const exportPdf = useCallback(async () => {
+    if (!activeDoc) return;
+    await new Promise((r) => setTimeout(r, 60));
+    const previewEl = document.querySelector<HTMLElement>(".toastui-editor-md-preview");
+    if (!previewEl) return;
+    const safeFilename =
+      (activeDoc.title || "doc").replace(/[/\\:*?"<>|]/g, "_").trim() || "doc";
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      await html2pdf()
+        .set({
+          margin: [12, 14, 14, 14],
+          filename: `${safeFilename}.pdf`,
+          image: { type: "jpeg", quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          pagebreak: { mode: ["css", "legacy"] },
+        })
+        .from(previewEl)
+        .save();
+    } catch (e) {
+      console.error("PDF export failed:", e);
+    }
+  }, [activeDoc]);
+
   return (
     <div className="app" data-public-share="true">
       {/* Mobile header — hamburger + brand + sign-up CTA */}
@@ -273,10 +300,30 @@ export function PublicShareView({ publication, index, isSignedIn }: Props) {
 
             {activeDoc ? (
               <>
-                <div className="doc-header">
-                  <div className="doc-header-row">
-                    <div className="doc-header-path">{activeDoc.path}</div>
-                  </div>
+                <div className="toolbar">
+                  <span className="doc-path">{activeDoc.path}</span>
+                  <span className="spacer" />
+                  <button
+                    className="btn-sibling-nav"
+                    onClick={() => prevSibling && selectDoc(prevSibling.path)}
+                    disabled={!prevSibling}
+                    type="button"
+                    title={prevSibling ? `← ${prevSibling.title}` : "No previous sibling"}
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    className="btn-sibling-nav"
+                    onClick={() => nextSibling && selectDoc(nextSibling.path)}
+                    disabled={!nextSibling}
+                    type="button"
+                    title={nextSibling ? `${nextSibling.title} →` : "No next sibling"}
+                  >
+                    Next →
+                  </button>
+                  <button className="btn-export-pdf" onClick={exportPdf} type="button" title="Export as PDF">
+                    Export PDF
+                  </button>
                 </div>
                 <div className="editor-host" data-mode="rendered">
                   <DocEditor
