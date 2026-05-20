@@ -1005,7 +1005,7 @@ export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddA
               type="button"
             >Next Node →</button>
           </div>
-          <div className="graph-controls-row">
+          <div className="graph-controls-row graph-controls-page-nav">
             <button
               className="graph-controls-btn"
               onClick={() => setPage((p) => (p - 1 + totalPages) % totalPages)}

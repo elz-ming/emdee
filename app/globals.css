@@ -1456,46 +1456,170 @@ a.sidebar-footer-btn { text-decoration: none; }
     height: auto;
   }
 
-  /* On mobile, stack graph above doc and let the page scroll naturally —
-     overflow:hidden + a clipped flex parent would otherwise hide the doc.
-     Resize divider is desktop-only. */
+  /* Mobile drawer model — graph stays full-screen behind a bottom drawer
+     that snaps between closed / peek / full. Replaces the old hard 50/50
+     split that wasted vertical space on portrait. */
   .main-split {
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     flex-direction: column;
-    overflow: visible;
+    overflow: hidden;
+    position: relative;
+    height: calc(100svh - 48px);
   }
   .split-divider { display: none; }
-  .graph-collapse-toggle {
+  .graph-collapse-toggle { display: none !important; }
+  .main-split .graph-pane {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Doc pane = fixed-bottom drawer. translateY is driven by the
+     data-mobile-drawer attribute on the parent .main-split. */
+  .doc-pane {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 92svh;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    border-left: none;
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.15);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1);
+    transform: translateY(100%);
+    will-change: transform;
+  }
+  .main-split[data-mobile-drawer="peek"] .doc-pane {
+    transform: translateY(calc(100% - 32svh));
+  }
+  .main-split[data-mobile-drawer="full"] .doc-pane {
+    transform: translateY(0);
+  }
+
+  /* Drawer header (drag bar + title + close button). */
+  .mobile-drawer-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 4px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--panel);
+    flex-shrink: 0;
+    position: relative;
+  }
+  .mobile-drawer-handle {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 18px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    width: 100%;
-    padding: 8px 12px;
-    background: var(--panel);
-    border: none;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--muted);
     -webkit-tap-highlight-color: transparent;
   }
-  .graph-collapse-toggle:active { background: var(--hover); }
-  .main-split[data-graph-collapsed="true"] .graph-pane { display: none; }
-  .main-split .graph-pane {
-    flex: 0 0 auto;
-    height: 35svh;
-    min-height: 35svh;
-    overflow: visible;
+  .mobile-drawer-handle-bar {
+    width: 44px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--border);
+    transition: background 120ms ease;
   }
-  .doc-pane {
-    flex: 0 0 auto;
-    height: 75svh;
-    min-height: 75svh;
-    overflow: visible;
-    border-left: none;
-    border-top: 1px solid var(--border);
+  .mobile-drawer-handle:active .mobile-drawer-handle-bar { background: var(--muted); }
+  .mobile-drawer-title {
+    flex: 1;
+    margin-top: 16px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg);
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 32px;
   }
+  .mobile-drawer-close {
+    position: absolute;
+    right: 8px;
+    top: 14px;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mobile-drawer-close:active { background: var(--bg); color: var(--fg); }
+
+  /* Floating FAB at bottom center when drawer is closed. */
+  .mobile-drawer-fab {
+    position: fixed;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 150;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 8px 24px rgba(80, 64, 232, 0.35), 0 2px 6px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    max-width: 78vw;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mobile-drawer-fab:active { transform: translateX(-50%) translateY(1px); }
+  .mobile-drawer-fab-arrow {
+    font-size: 16px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+  }
+  .mobile-drawer-fab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 60vw;
+  }
+
+  /* The graph's bottom-left controls (Focus chip, Prev/Next, Page nav,
+     zoom, breadcrumb) crowd the FAB area on small screens. Drop the
+     zoom buttons + Prev/Next Page nav — pinch + sidebar tree cover the
+     same ground. Keep Focus + Prev/Next Node + breadcrumb. */
+  .zoom-control { display: none !important; }
+  .graph-controls-page-nav { display: none !important; }
+  /* Lift the graph controls above the FAB so they don't collide. */
+  .graph-controls { bottom: 84px; }
 
   .graph-bar {
     overflow-x: auto;
@@ -1503,9 +1627,16 @@ a.sidebar-footer-btn { text-decoration: none; }
     padding: 8px 12px;
     -webkit-overflow-scrolling: touch;
   }
-  .graph-stage { min-height: 35svh; }
+  .graph-stage { min-height: 100%; }
 
   .modal { padding: 20px; }
+}
+
+/* Desktop: hide the mobile drawer header + FAB always. */
+@media (min-width: 769px) and (orientation: landscape),
+       (min-width: 1025px) {
+  .mobile-drawer-header { display: none; }
+  .mobile-drawer-fab { display: none; }
 }
 
 /* ── PDF export (print view) ─────────────────────────────

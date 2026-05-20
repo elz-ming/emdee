@@ -257,6 +257,12 @@ export function App({ namespace }: { namespace: string }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const collapsedInitialized = useRef(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Mobile drawer for the doc pane. Three states: closed (graph full,
+  // FAB visible), peek (drawer shows title + summary blockquote, ~32svh),
+  // full (drawer covers ~90svh, scrollable). Tapping a node bumps closed
+  // → peek so the user never needs two taps to see the content.
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileDrawerState, setMobileDrawerState] = useState<"closed" | "peek" | "full">("closed");
   const [canSync, setCanSync] = useState(false);
   const [cloudUserId, setCloudUserId] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "done" | "error">("idle");
@@ -266,6 +272,17 @@ export function App({ namespace }: { namespace: string }) {
   const [mcpCopied, setMcpCopied] = useState(false);
   const [mcpUrlCopied, setMcpUrlCopied] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // Track viewport — drives whether the doc-pane renders as a fixed-bottom
+  // drawer or the side-by-side split. Mirrors the mobile media query.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 768px), (orientation: portrait) and (max-width: 1024px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
   // Desktop: draggable split ratio between graph (left) and doc (right), 0.15-0.85.
   // Mobile/portrait: graph stacks above doc with a collapse toggle.
   // Both states persist to localStorage so the layout sticks across refreshes.
@@ -658,6 +675,15 @@ export function App({ namespace }: { namespace: string }) {
     setView("main");
     setMobileSidebarOpen(false);
   }, []);
+
+  // Graph-node taps on mobile auto-open the drawer to peek so the user
+  // doesn't need a second action to see the content. If the drawer is
+  // already peek/full, just change focus — preserves "skim multiple
+  // nodes while reading" once the drawer is up.
+  const onGraphSelect = useCallback((p: string) => {
+    setActivePath(p);
+    setMobileDrawerState((cur) => (isMobile && cur === "closed" ? "peek" : cur));
+  }, [isMobile]);
 
   // Keyboard shortcuts: `[` / `]` jump to prev / next sibling. Skipped when
   // an input or contentEditable has focus so we don't hijack typing.
@@ -1127,6 +1153,7 @@ export function App({ namespace }: { namespace: string }) {
             className="main-split"
             ref={splitContainerRef}
             data-graph-collapsed={graphCollapsed}
+            data-mobile-drawer={mobileDrawerState}
             style={{ "--graph-ratio": splitRatio } as React.CSSProperties}
           >
             <div className="graph-pane">
@@ -1134,7 +1161,7 @@ export function App({ namespace }: { namespace: string }) {
                 <GraphView
                   index={index}
                   activePath={activePath}
-                  onSelect={setActivePath}
+                  onSelect={onGraphSelect}
                   onAddChild={isOwnNamespace ? openAddChild : undefined}
                   onAddAssociation={isOwnNamespace ? openAddAssoc : undefined}
                   onDeleteNode={isOwnNamespace ? openDeleteNode : undefined}
@@ -1162,6 +1189,34 @@ export function App({ namespace }: { namespace: string }) {
               >
                 {graphCollapsed ? "▼ Show graph" : "▲ Hide graph"}
               </button>
+              {/* Mobile drawer header — only renders on mobile. Shows a drag
+                  handle (cycle full → peek → closed), the focused title,
+                  and a close (×) button. */}
+              <div className="mobile-drawer-header" aria-hidden={!isMobile}>
+                <button
+                  type="button"
+                  className="mobile-drawer-handle"
+                  onClick={() =>
+                    setMobileDrawerState((s) =>
+                      s === "full" ? "peek" : s === "peek" ? "closed" : "closed"
+                    )
+                  }
+                  aria-label="Lower drawer"
+                >
+                  <span className="mobile-drawer-handle-bar" />
+                </button>
+                <div className="mobile-drawer-title">
+                  {activeDoc?.title ?? "Doc"}
+                </div>
+                <button
+                  type="button"
+                  className="mobile-drawer-close"
+                  onClick={() => setMobileDrawerState("closed")}
+                  aria-label="Close drawer"
+                >
+                  ×
+                </button>
+              </div>
               {activeDoc ? (() => {
                 const isSharedView = activePath?.startsWith(SHARED_PREFIX) ?? false;
                 const isSharedDoc = !!activeSharedDoc;
@@ -1269,6 +1324,19 @@ export function App({ namespace }: { namespace: string }) {
           </div>
         )}
       </main>
+
+      {/* Mobile drawer FAB — only renders on mobile when drawer is closed.
+          Tapping it pulls the doc-pane up to full state. */}
+      {isMobile && view === "main" && mobileDrawerState === "closed" && activeDoc && (
+        <button
+          type="button"
+          className="mobile-drawer-fab"
+          onClick={() => setMobileDrawerState("full")}
+        >
+          <span className="mobile-drawer-fab-arrow" aria-hidden="true">↑</span>
+          <span className="mobile-drawer-fab-label">{activeDoc.title}</span>
+        </button>
+      )}
 
       {/* Add child modal */}
       {addChildCtx && (
