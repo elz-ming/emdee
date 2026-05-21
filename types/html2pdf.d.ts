@@ -17,6 +17,8 @@ declare module "html2pdf.js" {
     };
     pagebreak?: { mode?: string | string[]; before?: string; after?: string; avoid?: string };
     enableLinks?: boolean;
+    width?: number;
+    windowWidth?: number;
   }
 
   interface Html2Pdf {

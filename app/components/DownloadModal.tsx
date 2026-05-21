@@ -188,6 +188,11 @@ export function DownloadModal({ path, title, index, onClose }: Props) {
             `<div style="font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;color:#111827;">` +
             `<pre style="margin:0;white-space:pre-wrap;word-wrap:break-word;font-family:inherit;font-size:11px;line-height:1.55;">${escapeHtml(content)}</pre>` +
             `</div>`;
+          // width + windowWidth force html2pdf's container to a fixed
+          // pixel width. Without these, the lib measures the source
+          // div for its width — but in string mode the div is never
+          // inserted into the document, so clientWidth/scrollWidth
+          // are 0 and the container ends up width:0px → blank canvas.
           const worker = html2pdf()
             .set({
               margin: [12, 14, 14, 14],
@@ -195,6 +200,8 @@ export function DownloadModal({ path, title, index, onClose }: Props) {
               html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
               jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
               pagebreak: { mode: ["css", "legacy"] },
+              width: 794,
+              windowWidth: 794,
             })
             .from(innerHtml, "string");
           const pdfOut = await worker.output("blob");
