@@ -49,6 +49,10 @@ export interface LintWarning {
   /** For split_candidate / subgroup_materialization_candidate — the
    *  subsection/subgroup headings that triggered the warning. */
   candidates?: string[];
+  /** 1-indexed source line where the violation lives. Null for
+   *  doc-level codes (split_candidate, subgroup_materialization_candidate)
+   *  that don't have a single anchoring line. */
+  line: number | null;
 }
 
 export interface LintInfo {
@@ -91,19 +95,7 @@ export interface LintVaultContext {
   resolveTarget: (target: string) => LintDocInfo | null;
 }
 
-function stripFences(content: string): string {
-  const lines = content.split("\n");
-  const out: string[] = [];
-  let inFence = false;
-  for (const line of lines) {
-    if (FENCE_RE.test(line)) { inFence = !inFence; continue; }
-    if (inFence) continue;
-    out.push(line);
-  }
-  return out.join("\n");
-}
-
-function findPreambleBlock(content: string): { body: string } | null {
+function findPreambleBlock(content: string): { body: string; h1LineIdx: number } | null {
   const lines = content.split("\n");
   let inFence = false;
   let h1Idx = -1;
@@ -122,7 +114,7 @@ function findPreambleBlock(content: string): { body: string } | null {
     if (H2_RE.test(lines[i])) { firstH2Idx = i; break; }
   }
   const body = lines.slice(h1Idx + 1, firstH2Idx).join("\n").trim();
-  return { body };
+  return { body, h1LineIdx: h1Idx };
 }
 
 /**
@@ -131,20 +123,33 @@ function findPreambleBlock(content: string): { body: string } | null {
  * bullet count is what matters for the lint, not the number of links —
  * `* [[A]] — collaborated with [[B]]` is one declared edge to A, even
  * though two wiki-links appear.
+ *
+ * For each declared-edge heading we also track:
+ *  - `bulletLines`: 1-indexed line numbers of every leading-wiki-link bullet,
+ *    in source order, so callers (notably the `multiple_child_of` rule) can
+ *    point at the offending line.
+ *  - `titleLines`: first-seen 1-indexed line for each lowercase title
+ *    appearing under the heading, so per-title warnings (assoc-duplicates,
+ *    sibling-assoc, asymmetric edges) can anchor on the actual bullet.
  */
 function collectDeclaredEdges(content: string): {
   titlesByHeading: Map<string, Set<string>>;
   bulletCountByHeading: Map<string, number>;
+  bulletLinesByHeading: Map<string, number[]>;
+  titleLinesByHeading: Map<string, Map<string, number>>;
   allTitles: Set<string>;
 } {
   const lines = content.split("\n");
   const titlesByHeading = new Map<string, Set<string>>();
   const bulletCountByHeading = new Map<string, number>();
+  const bulletLinesByHeading = new Map<string, number[]>();
+  const titleLinesByHeading = new Map<string, Map<string, number>>();
   const allTitles = new Set<string>();
   let inFence = false;
   let currentHeading: string | null = null;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (FENCE_RE.test(line)) { inFence = !inFence; continue; }
     if (inFence) continue;
     const h2 = line.match(H2_RE);
@@ -153,17 +158,22 @@ function collectDeclaredEdges(content: string): {
       if (DECLARED_EDGE_HEADINGS.has(currentHeading)) {
         if (!titlesByHeading.has(currentHeading)) titlesByHeading.set(currentHeading, new Set());
         if (!bulletCountByHeading.has(currentHeading)) bulletCountByHeading.set(currentHeading, 0);
+        if (!bulletLinesByHeading.has(currentHeading)) bulletLinesByHeading.set(currentHeading, []);
+        if (!titleLinesByHeading.has(currentHeading)) titleLinesByHeading.set(currentHeading, new Map());
       }
       continue;
     }
     if (!currentHeading || !DECLARED_EDGE_HEADINGS.has(currentHeading)) continue;
 
+    let isBullet = false;
     if (BULLET_RE.test(line)) {
       // Only count bullets whose leading link is a wiki-link — defensive
       // against random "*" lines that aren't edge declarations.
       const leading = line.replace(BULLET_RE, "").match(WIKI_LINK_RE);
       if (leading) {
         bulletCountByHeading.set(currentHeading, (bulletCountByHeading.get(currentHeading) ?? 0) + 1);
+        bulletLinesByHeading.get(currentHeading)!.push(i + 1);
+        isBullet = true;
       }
     }
 
@@ -171,17 +181,23 @@ function collectDeclaredEdges(content: string): {
       const title = m[1].trim().toLowerCase();
       titlesByHeading.get(currentHeading)!.add(title);
       allTitles.add(title);
+      // Track the first line we saw this title on, so warnings can anchor
+      // on the original source line even if the title repeats.
+      const titleLines = titleLinesByHeading.get(currentHeading)!;
+      if (!titleLines.has(title) && isBullet) titleLines.set(title, i + 1);
+      else if (!titleLines.has(title)) titleLines.set(title, i + 1);
     }
   }
-  return { titlesByHeading, bulletCountByHeading, allTitles };
+  return { titlesByHeading, bulletCountByHeading, bulletLinesByHeading, titleLinesByHeading, allTitles };
 }
 
-function collectInlineMentions(content: string): Map<string, number> {
+function collectInlineMentions(content: string): Map<string, { count: number; firstLine: number }> {
   const lines = content.split("\n");
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { count: number; firstLine: number }>();
   let inFence = false;
   let currentHeading: string | null = null;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (FENCE_RE.test(line)) { inFence = !inFence; continue; }
     if (inFence) continue;
     const h2 = line.match(H2_RE);
@@ -193,7 +209,9 @@ function collectInlineMentions(content: string): Map<string, number> {
 
     for (const m of line.matchAll(/\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/g)) {
       const title = m[1].trim().toLowerCase();
-      counts.set(title, (counts.get(title) ?? 0) + 1);
+      const prev = counts.get(title);
+      if (prev) prev.count++;
+      else counts.set(title, { count: 1, firstLine: i + 1 });
     }
   }
   return counts;
@@ -299,8 +317,6 @@ function collectParentOfSubgroups(content: string): Array<{ heading: string; bul
 }
 
 export function lintDocContent(content: string, ctx?: LintVaultContext): LintResult {
-  const noFenceContent = stripFences(content);
-
   const preamble = findPreambleBlock(content);
   const has_preamble = !!preamble && preamble.body.length > 0 && !/^>\s*$/m.test(preamble.body)
     ? /^>\s*\S/.test(preamble.body)
@@ -309,7 +325,8 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
     ? preamble.body.replace(/^>\s*/gm, "").trim().split(/\s+/).filter(Boolean).length
     : 0;
 
-  const { titlesByHeading, bulletCountByHeading } = collectDeclaredEdges(content);
+  const { titlesByHeading, bulletCountByHeading, bulletLinesByHeading, titleLinesByHeading } =
+    collectDeclaredEdges(content);
   const declaredTitles = new Set<string>();
   for (const titles of titlesByHeading.values()) for (const t of titles) declaredTitles.add(t);
 
@@ -317,7 +334,9 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
   const child_of_count = bulletCountByHeading.get("child of") ?? 0;
   const has_child_of = child_of_count > 0;
 
-  const inlineCounts = collectInlineMentions(noFenceContent);
+  // Pass the original content (not noFenceContent) so reported line numbers
+  // match the source. collectInlineMentions handles fences internally.
+  const inlineCounts = collectInlineMentions(content);
 
   const warnings: LintWarning[] = [];
 
@@ -328,6 +347,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
         "No `>` blockquote summary found directly under the H1. The MCP `get_summary` tool returns empty for this doc — it'll be invisible to cheap retrieval.",
       suggestion:
         "Add a `> one-line summary` line immediately after the H1, then a blank line, then the body. Keep it to 1–3 sentences.",
+      line: preamble.h1LineIdx + 1,
     });
   }
 
@@ -340,6 +360,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
   const childOfTitles = titlesByHeading.get("child of") ?? new Set<string>();
   const parentOfTitles = titlesByHeading.get("parent of") ?? new Set<string>();
   const assocTitles = titlesByHeading.get("associated with") ?? new Set<string>();
+  const assocTitleLines = titleLinesByHeading.get("associated with") ?? new Map<string, number>();
   for (const t of assocTitles) {
     if (childOfTitles.has(t) || parentOfTitles.has(t)) {
       warnings.push({
@@ -347,6 +368,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
         message: `\`[[${t}]]\` appears in both \`## Associated with\` and the hierarchy (Child of / Parent of). The hierarchy edge already covers it.`,
         suggestion: `Remove \`[[${t}]]\` from \`## Associated with\` — the parent/child relationship is the canonical link and the assoc bullet is being suppressed in the graph anyway.`,
         title: t,
+        line: assocTitleLines.get(t) ?? null,
       });
     }
   }
@@ -371,18 +393,23 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
           message: `\`[[${t}]]\` is listed in \`## Associated with\` but shares the parent \`${sharedParent}\` with this doc — the two are siblings, already related through their common parent.`,
           suggestion: `Remove \`[[${t}]]\` from \`## Associated with\`. \`## Associated with\` is for cross-tree links (e.g. project↔person, sprint↔learning), not for connecting docs that share a parent.`,
           title: t,
+          line: assocTitleLines.get(t) ?? null,
         });
       }
     }
   }
 
   if (child_of_count > 1) {
+    // Anchor on the SECOND bullet — that's the violating one (the first
+    // bullet is the legitimate canonical parent).
+    const childOfBulletLines = bulletLinesByHeading.get("child of") ?? [];
     warnings.push({
       code: "multiple_child_of",
       message: `\`## Child of\` declares ${child_of_count} parents. The vault convention is single-parent — a doc lives under one canonical parent and uses \`## Associated with\` for cross-cutting connections.`,
       suggestion:
         "Keep one parent in `## Child of` (the canonical hierarchy placement) and move the others to `## Associated with` with a short prose note explaining the connection.",
       count: child_of_count,
+      line: childOfBulletLines[1] ?? null,
     });
   }
 
@@ -397,6 +424,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
       suggestion: `Plan an extraction with the \`distill_doc\` MCP, then execute with \`split_doc\`. Each H3 → its own doc, with the source rewritten as a thin index of wiki-links.`,
       count: substantiveSubsections.length,
       candidates: substantiveSubsections.map((s) => s.heading),
+      line: null,
     });
   }
 
@@ -409,11 +437,15 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
       suggestion: `Run \`materialize_subgroup\` per subgroup. Each promoted H3 becomes a real intermediate node; its bullets move under it and their \`## Child of\` rewires from this doc to the new intermediate.`,
       count: materializable.length,
       candidates: materializable.map((g) => g.heading),
+      line: null,
     });
   }
 
   // Cross-doc rules — only run when caller provided vault context.
   if (ctx) {
+    const parentOfTitleLines = titleLinesByHeading.get("parent of") ?? new Map<string, number>();
+    const childOfTitleLines = titleLinesByHeading.get("child of") ?? new Map<string, number>();
+
     const declaredChildrenTitles = titlesByHeading.get("parent of") ?? new Set<string>();
     for (const childTitle of declaredChildrenTitles) {
       const child = ctx.resolveTarget(childTitle);
@@ -425,6 +457,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
           message: `This doc lists \`[[${childTitle}]]\` in Parent of, but [[${child.title}]] doesn't declare this doc back in its Child of. The edge is one-sided.`,
           suggestion: `Either remove \`[[${childTitle}]]\` from this doc's Parent of, or add this doc to ${child.title}'s Child of so the edge is reciprocal.`,
           asymmetric_target: child.title,
+          line: parentOfTitleLines.get(childTitle) ?? null,
         });
       }
     }
@@ -440,13 +473,14 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
           message: `This doc lists \`[[${parentTitle}]]\` in Child of, but [[${parent.title}]] doesn't list this doc back in its Parent of. The edge is one-sided.`,
           suggestion: `Either remove \`[[${parentTitle}]]\` from this doc's Child of, or add this doc to ${parent.title}'s Parent of so the edge is reciprocal.`,
           asymmetric_target: parent.title,
+          line: childOfTitleLines.get(parentTitle) ?? null,
         });
       }
     }
   }
 
   const inline_mentions: Array<{ title: string; count: number }> = [];
-  for (const [title, count] of inlineCounts) {
+  for (const [title, { count, firstLine }] of inlineCounts) {
     inline_mentions.push({ title, count });
     if (count >= INLINE_MENTION_THRESHOLD && !declaredTitles.has(title)) {
       warnings.push({
@@ -455,6 +489,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
         suggestion: `Consider adding \`* [[${title}]]\` to the Associated with section if this is a real cross-cutting connection.`,
         title,
         count,
+        line: firstLine,
       });
     }
   }
