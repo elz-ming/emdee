@@ -17,6 +17,8 @@ import {
   patchSection,
   writeDocPreview,
   writeDoc,
+  createChild,
+  addAssociation,
 } from "../lib/mcp/tools/index.js";
 import type { ToolContext } from "../lib/mcp/tools/types.js";
 
@@ -191,6 +193,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["path", "content"],
       },
     },
+    {
+      name: "create_child",
+      description:
+        "Atomic create-and-link: writes a new doc with the canonical scaffold (H1 + summary placeholder + Child of / Parent of / Associated with / Notes) AND patches the parent's `## Parent of` to add the new bullet. Collapses the 5-round-trip add-child flow into one call. Use this instead of write_doc + patch_section for adding child nodes. `child_path` defaults to `<parent dir>/<sanitized title>.md`. Pass `gate_on_warnings` to hard-block on lint codes; multiple_child_of is always hard-gated internally.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          parent_path: { type: "string" },
+          title: { type: "string" },
+          body: { type: "string", description: "Optional body content appended after ## Notes." },
+          summary: { type: "string", description: "Optional blockquote summary; placeholder if omitted." },
+          child_path: { type: "string", description: "Optional path override. Default: <parent dir>/<sanitized title>.md." },
+          gate_on_warnings: {
+            type: "array", items: { type: "string" },
+            description: "Lint codes to hard-block on. Default [].",
+          },
+        },
+        required: ["parent_path", "title"],
+      },
+    },
+    {
+      name: "add_association",
+      description:
+        "Atomic two-sided assoc: patches both docs' `## Associated with` to include the other (with optional shared label, identical on both bullets). Hard-refuses if the pair is already linked hierarchically OR if they share a parent (siblings) — returns `would_duplicate_hierarchy` with the existing edge info. Idempotent: if both sides already declare the assoc, returns ok with `a_updated: false, b_updated: false`. Use this instead of two patch_section calls for cross-tree links.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          a_path: { type: "string" },
+          b_path: { type: "string" },
+          label: { type: "string", description: "Optional shared label appended as ` — <label>` to both bullets." },
+          gate_on_warnings: {
+            type: "array", items: { type: "string" },
+            description: "Lint codes to hard-block on (in addition to associate_duplicates_hierarchy and sibling_assoc_redundant which are always hard-gated). Default [].",
+          },
+        },
+        required: ["a_path", "b_path"],
+      },
+    },
   ],
 }));
 
@@ -209,6 +249,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req): Promise<CallToolRes
     case "patch_section":     return await patchSection(ctx, a) as CallToolResult;
     case "write_doc_preview": return await writeDocPreview(ctx, a) as CallToolResult;
     case "write_doc":         return await writeDoc(ctx, a) as CallToolResult;
+    case "create_child":      return await createChild(ctx, a) as CallToolResult;
+    case "add_association":   return await addAssociation(ctx, a) as CallToolResult;
     default:
       throw new Error(`unknown tool: ${name}`);
   }

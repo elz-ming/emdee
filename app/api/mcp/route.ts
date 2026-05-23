@@ -7,7 +7,7 @@ import type { ToolContext } from "@/src/lib/mcp/tools/types";
 import {
   listDocs, getSummary, getNeighbors, getContext, getDoc, search,
   appendSection, patchSection, writeDocPreview, writeDoc, deleteDoc, splitDoc, renameDoc, patchPreamble, appendDoc,
-  lintDoc, distillDoc, materializeSubgroup,
+  lintDoc, distillDoc, materializeSubgroup, createChild, addAssociation,
 } from "@/src/lib/mcp/tools/index";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +52,12 @@ Read-side defaults (SPRINT-018):
 - get_doc returns title + summary + preamble + section headings only. Pass full=true for the body.
 - get_context is the multi-hop big sibling of get_neighbors — returns the focal + neighbourhood within a token budget. Prefer it over chaining get_doc + get_neighbors when you need a coherent local view.
 
+Write-side atomics (SPRINT-019):
+- create_child(parent_path, title, body?, summary?) — atomic write + parent patch. Use this instead of write_doc + patch_section for adding child nodes.
+- add_association(a_path, b_path, label?) — atomic two-sided assoc patch. Hard-refuses sibling or hierarchy-duplicating pairs. Use this instead of two patch_section calls for cross-tree links.
+- Every write tool accepts gate_on_warnings: [lint_codes]. Recommended for routine writes: ["multiple_child_of", "associate_duplicates_hierarchy", "sibling_assoc_redundant"]. Gating refuses the write and returns { error: "lint_gate_failed", fixes: [{ line, fix_suggestion }] } so you can correct and retry inside the same turn.
+- get_doc returns a stable section_id per H2. Pass section_id to patch_section / append_section instead of heading whenever heading text might drift.
+
 Key conventions:
 - Every doc starts with one H1 + one > blockquote summary immediately below it.
 - Sprints: Child of [[PROJECT — BUILD]] if active/spec, Child of [[PROJECT — LOGS]] if shipped.
@@ -91,6 +97,8 @@ Shared docs:
       { name: "rename_doc", description: "Rename a doc: rewrite its H1, move it to a new path (default: same directory, filename derived from the new title), and update every `[[old_title]]` wiki-link across the vault to point at the new title. Pre-flight checks block title and path collisions. DESTRUCTIVE — rewrites many docs in one call.", inputSchema: { type: "object", properties: { old_path: { type: "string" }, new_title: { type: "string" }, new_path: { type: "string" } }, required: ["old_path", "new_title"] } },
       { name: "patch_preamble", description: "Replace the body region between the H1 and the first H2 (the blockquote summary + any intro paragraphs). The H1 itself is untouched — use rename_doc to change the title. Version-guarded with expected_content_hash from a recent get_doc.preamble. Use this when load-bearing wiki-links sit in the summary or intro and patch_section can't reach them. Pass `gate_on_warnings: [\"code\", ...]` to hard-block the write when any of those lint codes would fire on the proposed content.", inputSchema: { type: "object", properties: { path: { type: "string" }, body: { type: "string" }, expected_content_hash: { type: "string" }, gate_on_warnings: { type: "array", items: { type: "string" }, description: "Lint codes to hard-block on. Default []." } }, required: ["path", "body", "expected_content_hash"] } },
       { name: "materialize_subgroup", description: "Promote an H3 subgroup inside a doc's `## Parent of` to a real intermediate parent doc. Use when a parent has accumulated too many children and they're already grouped semantically with H3 headings (lint surfaces these as `subgroup_materialization_candidate`). Atomically: creates the new intermediate doc with the subgroup's bullets as its `## Parent of`, replaces the H3 region in the source with a single bullet pointing at the intermediate, and rewires each affected child's `## Child of` from the old parent to the new intermediate. `new_doc_title` defaults to `<source title> — <subgroup heading>`; `new_doc_path` defaults to `<source dir>/<sanitized title>.md`.", inputSchema: { type: "object", properties: { source_path: { type: "string" }, subgroup_heading: { type: "string" }, new_doc_title: { type: "string" }, new_doc_path: { type: "string" }, summary: { type: "string" } }, required: ["source_path", "subgroup_heading"] } },
+      { name: "create_child", description: "Atomic create-and-link: writes a new doc with the canonical scaffold (H1 + summary placeholder + Child of / Parent of / Associated with / Notes) AND patches the parent's `## Parent of` to add the new bullet. Collapses the 5-round-trip add-child flow into one call. Use this instead of write_doc + patch_section for adding child nodes. `child_path` defaults to `<parent dir>/<sanitized title>.md`. `summary` becomes `_summary pending_` placeholder if omitted. Pre-flight refuses if parent missing, child path occupied (with non-byte-equal content), or title collides. Pass `gate_on_warnings: [\"code\", ...]` to hard-block on lint codes; multiple_child_of is always hard-gated internally.", inputSchema: { type: "object", properties: { parent_path: { type: "string" }, title: { type: "string" }, body: { type: "string", description: "Optional body content appended after the scaffold's ## Notes header." }, summary: { type: "string", description: "Optional blockquote summary. Falls back to a placeholder." }, child_path: { type: "string", description: "Optional override for the new doc's path. Default: <parent_dir>/<sanitized_title>.md." }, gate_on_warnings: { type: "array", items: { type: "string" }, description: "Lint codes to hard-block on. Default []." } }, required: ["parent_path", "title"] } },
+      { name: "add_association", description: "Atomic two-sided assoc: patches both docs' `## Associated with` to include the other (with optional shared label, identical on both bullets). Hard-refuses if the pair is already linked hierarchically (parent/child) OR if they share a parent (siblings) — returns `would_duplicate_hierarchy` with the existing edge info. Idempotent: if both sides already declare the assoc, returns ok with `a_updated: false, b_updated: false`. Use this instead of two patch_section calls for cross-tree links. Pass `gate_on_warnings: [\"code\", ...]` to hard-block on additional lint codes.", inputSchema: { type: "object", properties: { a_path: { type: "string" }, b_path: { type: "string" }, label: { type: "string", description: "Optional shared label appended as ` — <label>` to both bullets." }, gate_on_warnings: { type: "array", items: { type: "string" }, description: "Lint codes to hard-block on (in addition to associate_duplicates_hierarchy and sibling_assoc_redundant which are always hard-gated). Default []." } }, required: ["a_path", "b_path"] } },
     ],
   }));
 
@@ -116,6 +124,8 @@ Shared docs:
       case "lint_doc":          return await lintDoc(ctx, a) as CallToolResult;
       case "distill_doc":       return await distillDoc(ctx, a) as CallToolResult;
       case "materialize_subgroup": return await materializeSubgroup(ctx, a) as CallToolResult;
+      case "create_child":      return await createChild(ctx, a) as CallToolResult;
+      case "add_association":   return await addAssociation(ctx, a) as CallToolResult;
       default: throw new Error(`unknown tool: ${name}`);
     }
   });
