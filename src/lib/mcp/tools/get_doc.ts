@@ -41,6 +41,25 @@ function hashBody(body: string): string {
 }
 
 /**
+ * Deterministic short ID for an H2 section. Derived from the lowercased
+ * heading text plus the section's 0-indexed ordinal among H2s in the doc,
+ * so two sections that happen to share a heading (rare but valid) get
+ * distinct IDs. No DB persistence — the value re-derives on every read.
+ *
+ * SPRINT-019 Phase B: stable lookup key for patch_section / append_section,
+ * complements the existing fuzzy heading-name match. The ordinal also
+ * means the ID is stable across rename of the heading IF the section
+ * stays at the same position — which is the right behaviour for the
+ * "I just got these IDs from get_doc, now patch one of them" flow.
+ */
+export function sectionId(heading: string, ordinalIdx: number): string {
+  return createHash("sha256")
+    .update(heading.toLowerCase() + ":" + ordinalIdx, "utf8")
+    .digest("hex")
+    .slice(0, 12);
+}
+
+/**
  * Return doc metadata. SPRINT-018 Phase 5: the body is now opt-in via
  * `full=true`. The default response is light — title + summary +
  * preamble + section headings — and is intended as the staple
@@ -53,7 +72,8 @@ export async function getDoc(ctx: ToolContext, args: Record<string, unknown>): P
   const doc = idx.docs.find((d) => d.path === String(args.path));
   if (!doc) throw new Error(`no such doc: ${args.path}`);
   const full = Boolean(args.full);
-  const sections = parseSections(doc.content).map((s) => ({
+  const sections = parseSections(doc.content).map((s, idx) => ({
+    id: sectionId(s.heading, idx),
     heading: s.heading,
     content_hash: hashBody(extractBody(doc.content, s)),
   }));

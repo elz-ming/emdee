@@ -92,7 +92,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_doc",
       description:
-        "Returns title + summary + preamble + section headings (with content_hash for follow-up patch_section). Pass `full=true` for the body. Use `get_context` instead when you need the focal + its neighbourhood — cheaper than chaining get_doc + get_neighbors.",
+        "Returns title + summary + preamble + section headings. Each section in `sections` carries `{ id, heading, content_hash }` — `id` is a stable short string for patch_section / append_section lookup (preferred over `heading` when the heading text is fuzzy or may collide), `content_hash` is the version guard for patch_section. Pass `full=true` for the body. Use `get_context` instead when you need the focal + its neighbourhood — cheaper than chaining get_doc + get_neighbors.",
       inputSchema: {
         type: "object",
         properties: {
@@ -118,37 +118,39 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "append_section",
       description:
-        "Append markdown content to the end of an existing H2 section. Section-scoped — safer than write_doc for incremental edits. Pass create_if_missing=true to add a new H2 section at the end of the file if the heading doesn't exist (default false, returns section_not_found error). Returns the new content_hash of the section for follow-up patches. Edge convention: `## Associated with` is for cross-tree links only (e.g. project↔person, sprint↔learning). Do NOT add an associate that's already a parent/child OR a sibling (shares a parent) of this doc — the hierarchy already conveys that relationship and duplicate edges get suppressed in the graph.",
+        "Append markdown content to the end of an existing H2 section. Section-scoped — safer than write_doc for incremental edits. Either `heading` or `section_id` (from get_doc.sections[].id) must be provided — `section_id` is the preferred exact-match lookup. Pass create_if_missing=true (with `heading`) to add a new H2 at the end of the file if not found (default false, returns section_not_found). Returns the new section_id + content_hash for follow-up patches. Edge convention: `## Associated with` is for cross-tree links only (e.g. project↔person, sprint↔learning). Do NOT add an associate that's already a parent/child OR a sibling (shares a parent) of this doc — the hierarchy already conveys that relationship and duplicate edges get suppressed in the graph.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
           heading: { type: "string", description: "H2 heading text without the `## ` prefix" },
+          section_id: { type: "string", description: "Preferred lookup key from get_doc.sections[].id." },
           body: { type: "string", description: "Markdown body to append to the section" },
           create_if_missing: {
             type: "boolean",
             description: "If true, create the section at end of file when heading is not found. Default false.",
           },
         },
-        required: ["path", "heading", "body"],
+        required: ["path", "body"],
       },
     },
     {
       name: "patch_section",
       description:
-        "Replace the body of an existing H2 section. Version-guarded: pass expected_content_hash from a prior get_doc, append_section, or patch_section response. Mismatch returns a structured version_conflict error with the actual hash so you can re-read and reconcile. This is the ONLY safe path for destructive section edits — never use write_doc for incremental edits, it replaces the entire file and silently loses content. Edge convention: `## Associated with` is for cross-tree links only. Do NOT add an associate that's already a parent/child OR a sibling (shares a parent) — the hierarchy already conveys that relationship and duplicate edges get suppressed in the graph.",
+        "Replace the body of an existing H2 section. Version-guarded: pass expected_content_hash from a prior get_doc, append_section, or patch_section response. Either `heading` or `section_id` (from get_doc.sections[].id) must be provided — `section_id` is the preferred exact-match lookup. If both are provided and resolve to different sections, returns `section_id_heading_mismatch`. Mismatch on the hash returns a structured version_conflict error with the actual hash so you can re-read and reconcile. This is the ONLY safe path for destructive section edits — never use write_doc for incremental edits, it replaces the entire file and silently loses content. Edge convention: `## Associated with` is for cross-tree links only. Do NOT add an associate that's already a parent/child OR a sibling (shares a parent) — the hierarchy already conveys that relationship and duplicate edges get suppressed in the graph.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
           heading: { type: "string", description: "H2 heading text without the `## ` prefix" },
+          section_id: { type: "string", description: "Preferred lookup key from get_doc.sections[].id." },
           body: { type: "string", description: "New body content for the section" },
           expected_content_hash: {
             type: "string",
             description: "Short hash of the section's current body (from get_doc.sections or a previous mutation's response).",
           },
         },
-        required: ["path", "heading", "body", "expected_content_hash"],
+        required: ["path", "body", "expected_content_hash"],
       },
     },
     {

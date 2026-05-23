@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { validatePath, readVaultFile, writeVaultFile } from "./vault";
+import { sectionId } from "./get_doc";
 import type { ToolContext } from "./types";
 
 function json(value: unknown) {
@@ -47,25 +48,64 @@ function hashBody(body: string): string {
 export async function appendSection(ctx: ToolContext, args: Record<string, unknown>): Promise<unknown> {
   const rel = String(args.path);
   validatePath(rel);
-  const heading = String(args.heading ?? "").trim();
+  const headingArg = args.heading !== undefined ? String(args.heading).trim() : "";
+  const sectionIdArg = args.section_id !== undefined ? String(args.section_id).trim() : "";
   const body = String(args.body ?? "");
   const createIfMissing = Boolean(args.create_if_missing ?? false);
-  if (!heading) throw new Error("heading required");
+  if (!headingArg && !sectionIdArg) throw new Error("heading or section_id required");
 
   const content = await readVaultFile(ctx, rel);
   if (content === null) return json({ error: "doc_not_found", path: rel });
 
   const sections = parseSections(content);
-  const target = findSection(sections, heading);
+
+  // Resolve target. Same precedence as patch_section.
+  let target: SectionLoc | undefined;
+  let idTarget: SectionLoc | undefined;
+  let headingTarget: SectionLoc | undefined;
+  if (sectionIdArg) {
+    for (let i = 0; i < sections.length; i++) {
+      if (sectionId(sections[i].heading, i) === sectionIdArg) {
+        idTarget = sections[i];
+        break;
+      }
+    }
+  }
+  if (headingArg) {
+    headingTarget = findSection(sections, headingArg);
+  }
+  if (sectionIdArg && headingArg && idTarget && headingTarget && idTarget !== headingTarget) {
+    return json({
+      error: "section_id_heading_mismatch",
+      section_id_resolves_to: idTarget.heading,
+      heading_resolves_to: headingTarget.heading,
+    });
+  }
+  target = idTarget ?? headingTarget;
 
   if (!target) {
-    if (!createIfMissing) {
-      return json({ error: "section_not_found", heading, available: sections.map((s) => s.heading), hint: "Pass create_if_missing=true to create the section at end of file." });
+    if (!createIfMissing || !headingArg) {
+      return json({
+        error: "section_not_found",
+        heading: headingArg || undefined,
+        section_id: sectionIdArg || undefined,
+        available: sections.map((s, i) => ({ id: sectionId(s.heading, i), heading: s.heading })),
+        hint: headingArg
+          ? "Pass create_if_missing=true to create the section at end of file."
+          : "Pass a heading (not just section_id) plus create_if_missing=true to create a new section.",
+      });
     }
     const sep = content.endsWith("\n") ? "" : "\n";
-    const newContent = content + sep + `\n## ${heading}\n\n${body}\n`;
+    const newContent = content + sep + `\n## ${headingArg}\n\n${body}\n`;
     await writeVaultFile(ctx, rel, newContent);
-    return json({ ok: true, created: true, content_hash: hashBody(body.trim()) });
+    const newSections = parseSections(newContent);
+    const newIdx = newSections.findIndex((s) => s.heading === headingArg);
+    return json({
+      ok: true,
+      created: true,
+      content_hash: hashBody(body.trim()),
+      section_id: newIdx >= 0 ? sectionId(headingArg, newIdx) : undefined,
+    });
   }
 
   const lines = content.split("\n");
@@ -76,7 +116,12 @@ export async function appendSection(ctx: ToolContext, args: Record<string, unkno
   await writeVaultFile(ctx, rel, newContent);
 
   const newSections = parseSections(newContent);
-  const newTarget = findSection(newSections, heading);
+  const newIdx = newSections.findIndex((s) => s.heading === target!.heading);
+  const newTarget = newIdx >= 0 ? newSections[newIdx] : undefined;
   const newBody = newTarget ? extractBody(newContent, newTarget) : "";
-  return json({ ok: true, content_hash: hashBody(newBody) });
+  return json({
+    ok: true,
+    content_hash: hashBody(newBody),
+    section_id: newIdx >= 0 ? sectionId(target.heading, newIdx) : undefined,
+  });
 }
