@@ -66,6 +66,13 @@ export interface LintResult {
   info: LintInfo;
 }
 
+export interface LintDocInfo {
+  path: string;
+  title: string;
+  declaredParents: string[];
+  declaredChildren: string[];
+}
+
 /** Minimal vault context the cross-doc rules need. */
 export interface LintVaultContext {
   /** Path of the doc being linted, so cross-doc checks can locate "me" by path. */
@@ -74,8 +81,14 @@ export interface LintVaultContext {
    *  sibling-assoc check to detect when an assoc target is actually a sibling
    *  (i.e. shares one of these parents). */
   selfDeclaredParents: string[];
-  /** Every doc in the vault, by title-lowercased — used to resolve wiki-link targets. */
-  docsByTitle: Map<string, { path: string; title: string; declaredParents: string[]; declaredChildren: string[] }>;
+  /** Resolve a wiki-link target (raw title or slug text) to a doc info entry
+   *  using the locality-aware resolver. Returns null for dangling links.
+   *  Cross-doc checks (asymmetric edges, sibling assoc) MUST use this
+   *  rather than a title-only map so that links like `[[GBI-DAY3]]` —
+   *  where the slug matches but the title is "GBI — DAY3" — resolve
+   *  correctly, and so that ambiguous titles get disambiguated by the
+   *  linking doc's path. */
+  resolveTarget: (target: string) => LintDocInfo | null;
 }
 
 function stripFences(content: string): string {
@@ -349,7 +362,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
     for (const t of assocTitles) {
       // Skip pairs already flagged by the hierarchy-overlap rule above.
       if (childOfTitles.has(t) || parentOfTitles.has(t)) continue;
-      const target = ctx.docsByTitle.get(t);
+      const target = ctx.resolveTarget(t);
       if (!target) continue;
       const sharedParent = target.declaredParents.find((p) => selfParents.has(p));
       if (sharedParent) {
@@ -403,7 +416,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
   if (ctx) {
     const declaredChildrenTitles = titlesByHeading.get("parent of") ?? new Set<string>();
     for (const childTitle of declaredChildrenTitles) {
-      const child = ctx.docsByTitle.get(childTitle);
+      const child = ctx.resolveTarget(childTitle);
       if (!child) continue; // dangling link — separate concern, not asymmetric
       const childDeclaresMe = child.declaredParents.some((p) => p === ctx.selfPath);
       if (!childDeclaresMe) {
@@ -418,7 +431,7 @@ export function lintDocContent(content: string, ctx?: LintVaultContext): LintRes
 
     const declaredParentTitles = titlesByHeading.get("child of") ?? new Set<string>();
     for (const parentTitle of declaredParentTitles) {
-      const parent = ctx.docsByTitle.get(parentTitle);
+      const parent = ctx.resolveTarget(parentTitle);
       if (!parent) continue;
       const parentDeclaresMe = parent.declaredChildren.some((c) => c === ctx.selfPath);
       if (!parentDeclaresMe) {
