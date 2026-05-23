@@ -54,14 +54,23 @@ async function hasShareAccess(granteeId: string, ownerId: string, relPath: strin
 }
 
 /**
- * Builds the index of the user's own vault, then appends docs shared with
- * them. Both sub-indexes are sourced via storage.listWithContent / the
- * cache so the bulk read is one round-trip. Edges from the two
- * sub-indexes don't cross-link — wiki-link resolution stays within each
- * owner's namespace, so the grantee can navigate shared docs by title
- * without leaking back to their own vault.
+ * Per-request memo. SPRINT-024 Phase 2: a single MCP session often issues
+ * multiple read tool calls (get_doc → get_neighbors → read_doc_section …)
+ * each of which historically re-built the index. The memo collapses those
+ * to one bulk read per `ctx`. WeakMap so the entry is GC'd when the
+ * session-scoped ToolContext drops out of scope. Invalidated on
+ * writeVaultFile / deleteVaultFile so chained read-modify-read flows
+ * within one session see fresh content.
  */
-export async function loadVaultIndex(ctx: ToolContext): Promise<DocIndex> {
+const indexMemo = new WeakMap<object, Promise<DocIndex>>();
+
+function invalidateIndexMemo(ctx: ToolContext): void {
+  // ToolContext for "local" is a plain object — WeakMap accepts it; for
+  // "cloud" it's the live object passed from the MCP route handler.
+  indexMemo.delete(ctx as unknown as object);
+}
+
+async function buildVaultIndex(ctx: ToolContext): Promise<DocIndex> {
   if (ctx.mode === "local") return buildIndex(ctx.docsDir);
 
   const ownPrefix = `${ctx.userId}/`;
@@ -90,6 +99,30 @@ export async function loadVaultIndex(ctx: ToolContext): Promise<DocIndex> {
   };
 }
 
+/**
+ * Builds the index of the user's own vault, then appends docs shared with
+ * them. Both sub-indexes are sourced via storage.listWithContent / the
+ * cache so the bulk read is one round-trip. Edges from the two
+ * sub-indexes don't cross-link — wiki-link resolution stays within each
+ * owner's namespace, so the grantee can navigate shared docs by title
+ * without leaking back to their own vault.
+ *
+ * Memoised on `ctx`: see `indexMemo` above.
+ */
+export async function loadVaultIndex(ctx: ToolContext): Promise<DocIndex> {
+  const key = ctx as unknown as object;
+  const existing = indexMemo.get(key);
+  if (existing) return existing;
+  const promise = buildVaultIndex(ctx).catch((err) => {
+    // Don't cache failures — a transient Supabase blip shouldn't poison
+    // the rest of the session.
+    indexMemo.delete(key);
+    throw err;
+  });
+  indexMemo.set(key, promise);
+  return promise;
+}
+
 export async function readVaultFile(ctx: ToolContext, rel: string): Promise<string | null> {
   if (ctx.mode === "local") {
     try {
@@ -111,22 +144,33 @@ export async function writeVaultFile(ctx: ToolContext, rel: string, content: str
   if (rel.startsWith(SHARED_PATH_PREFIX)) {
     throw new Error("shared docs are read-only — ask the owner to make the edit");
   }
-  if (ctx.mode === "local") {
-    const file = localSafePath(ctx.docsDir, rel);
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, content, "utf8");
-    return;
+  try {
+    if (ctx.mode === "local") {
+      const file = localSafePath(ctx.docsDir, rel);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, content, "utf8");
+      return;
+    }
+    await ctx.storage.write(`${ctx.userId}/${rel}`, content);
+  } finally {
+    // Bust the per-request memo whether the write succeeded or threw —
+    // a partial write may still have committed bucket content, and
+    // either way the cached index is stale.
+    invalidateIndexMemo(ctx);
   }
-  await ctx.storage.write(`${ctx.userId}/${rel}`, content);
 }
 
 export async function deleteVaultFile(ctx: ToolContext, rel: string): Promise<void> {
   if (rel.startsWith(SHARED_PATH_PREFIX)) {
     throw new Error("shared docs are read-only — ask the owner to delete");
   }
-  if (ctx.mode === "local") {
-    await rm(localSafePath(ctx.docsDir, rel), { force: true });
-    return;
+  try {
+    if (ctx.mode === "local") {
+      await rm(localSafePath(ctx.docsDir, rel), { force: true });
+      return;
+    }
+    await ctx.storage.delete(`${ctx.userId}/${rel}`);
+  } finally {
+    invalidateIndexMemo(ctx);
   }
-  await ctx.storage.delete(`${ctx.userId}/${rel}`);
 }

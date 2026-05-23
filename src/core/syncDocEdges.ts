@@ -259,6 +259,11 @@ export async function syncDocEdges(
   const desiredRows: EdgeRow[] = [...desired.hierMap.values(), ...desired.assocMap.values()];
 
   // Load current rows that touch docPath (outgoing + inbound).
+  // SPRINT-024 Phase 2 audit: doc_edges reads MUST stay independent of
+  // vault_files — never JOIN them. Any "I need the linked doc's body
+  // alongside the edge" caller should fetch the body separately through
+  // SupabaseStorage.read so a future Postgres-only edge store can drop
+  // the vault_files dependency entirely.
   const { data: curFrom, error: e1 } = await admin
     .from("doc_edges")
     .select("from_path, to_path, kind, label, position")

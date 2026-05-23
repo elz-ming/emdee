@@ -26,6 +26,35 @@ export class SupabaseStorage implements VaultStorage {
     return this.walkFolder(folder);
   }
 
+  /**
+   * Metadata-only list. SPRINT-024 Phase 2 — selects only the columns the
+   * caller needs (namespace, file_path, updated_at) so the wire payload is
+   * a fraction of `listWithContent`'s. Used by change-polling and other
+   * surfaces that just want "what files exist + when did they last move".
+   *
+   * Like `listWithContent`, the fast path requires a single-segment
+   * namespace prefix; deeper prefixes fall back to walking Storage and
+   * stamping empty bodies.
+   */
+  async listMeta(prefix?: string): Promise<VaultFile[]> {
+    const folder = prefix ? prefix.replace(/\/$/, "") : "";
+    if (!folder || folder.includes("/")) {
+      return this.walkFolder(folder);
+    }
+    const { data, error } = await adminClient()
+      .from(CACHE_TABLE)
+      .select("file_path, updated_at")
+      .eq("namespace", folder);
+    if (!error && data) {
+      return data.map((r) => ({
+        path: `${folder}/${r.file_path}`,
+        content: "",
+        updatedAt: r.updated_at as string,
+      }));
+    }
+    return this.walkFolder(folder);
+  }
+
   private async walkFolder(folder: string): Promise<VaultFile[]> {
     const { data, error } = await this.bucket().list(folder || undefined, { limit: 1000 });
     if (error || !data) return [];

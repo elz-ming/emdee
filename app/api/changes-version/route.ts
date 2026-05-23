@@ -25,7 +25,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const listed = await storage.list(prefix || undefined);
+    // SPRINT-024 Phase 2: listMeta pulls {file_path, updated_at} from the
+    // vault_files cache — no recursive Storage walk, no body bytes.
+    const listed = await storage.listMeta(prefix || undefined);
     const version = listed.reduce((max, f) => (f.updatedAt > max ? f.updatedAt : max), "");
     return Response.json({ version: version || null }, { headers: { "Cache-Control": "no-store" } });
   } catch {

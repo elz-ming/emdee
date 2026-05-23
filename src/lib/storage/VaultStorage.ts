@@ -8,6 +8,16 @@ export interface VaultStorage {
   /** List all .md files, optionally filtered to a path prefix. */
   list(prefix?: string): Promise<VaultFile[]>;
   /**
+   * Metadata-only list (path + updatedAt, no body). Cheaper than `list()`
+   * for cloud — pulls from the vault_files cache instead of recursing
+   * Storage. Use this whenever the caller doesn't need bodies (change
+   * polling, summary endpoints). Returns the same VaultFile shape with
+   * `content: ""` for compat.
+   *
+   * SPRINT-024 Phase 2.
+   */
+  listMeta(prefix?: string): Promise<VaultFile[]>;
+  /**
    * Bulk-read every .md file under `prefix` in one shot. Implementations
    * are encouraged to use a single round-trip — SupabaseStorage hits the
    * vault_files Postgres cache so /api/index doesn't pay per-file HTTPS.

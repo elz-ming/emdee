@@ -43,6 +43,11 @@ export class FilesystemStorage implements VaultStorage {
     }
   }
 
+  /** FS already lists metadata without bodies — listMeta is an alias. */
+  async listMeta(prefix?: string): Promise<VaultFile[]> {
+    return this.list(prefix);
+  }
+
   async listWithContent(prefix?: string): Promise<VaultFile[]> {
     const listed = await this.list(prefix);
     return Promise.all(
