@@ -88,11 +88,11 @@ body {
   border-right: 1px solid var(--border);
   padding: 20px 16px;
   overflow-y: auto;
-  /* Allow horizontal scroll so deeply-nested rows past the 260px nominal
-   * width can pan into view (the active row also calls scrollIntoView
-   * with inline:"nearest", so a graph-click on a leaf brings the label
-   * into view automatically). */
-  overflow-x: auto;
+  /* Sidebar itself never horizontal-scrolls — the connect-to-claude
+   * panel at the top and the admin/history/sign-out footer at the
+   * bottom should stay anchored. Only the doc-tree root scrolls
+   * horizontally to handle deep nesting (see .doc-tree[data-root]). */
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   transition: width 0.25s ease, padding 0.25s ease, border-color 0.25s ease;
@@ -160,6 +160,16 @@ body {
   padding: 0;
   margin: 0;
   position: relative;
+}
+/* Only the root doc-tree scrolls horizontally — the header and footer
+ * sections of the sidebar must not move when the user pans to read a
+ * deeply-nested label. Nested doc-trees inherit (and stay laid out
+ * naturally within the scrollable root). */
+.doc-tree[data-root="true"] {
+  overflow-x: auto;
+  /* Cap at the sidebar's content width so the horizontal scrollbar
+   * shows up only when rows actually exceed that width. */
+  max-width: 100%;
 }
 .doc-tree[data-root="false"] {
   margin-left: 14px;
