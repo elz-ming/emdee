@@ -4,12 +4,27 @@ import { getVaultStorage } from "@/src/lib/storage";
 import type { VaultStorage } from "@/src/lib/storage";
 import { adminClient } from "@/src/lib/supabase/admin";
 import { ensureProfile } from "@/src/lib/supabase/oauth";
+import { vaultListTag } from "@/src/lib/cache/bust";
 
-export const dynamic = "force-dynamic";
+// SPRINT-024 Phase 3: dropped `dynamic = "force-dynamic"` so the public
+// namespace can sit behind Vercel's edge cache. Personal namespaces are
+// still gated by Clerk auth and emit `no-store`; only `?ns=public` gets
+// `s-maxage` + a Cache-Tag so `bustVaultCache("public", …)` can purge it
+// on writes.
 export const runtime = "nodejs";
 
 const EMPTY = { docs: [], edges: [], entry: null };
 const NO_STORE = { headers: { "Cache-Control": "no-store" } };
+
+function publicCacheHeaders(ns: string): Record<string, string> {
+  return {
+    "Cache-Control": "public, s-maxage=60, stale-while-revalidate=600",
+    // Vercel-specific: when present, `revalidateTag(tag)` purges any
+    // edge entry carrying this tag. Off Vercel this header is ignored
+    // and the s-maxage TTL is the only invalidator (60s eventual).
+    "Cache-Tag": vaultListTag(ns),
+  };
+}
 
 /**
  * Copy every file under `public/` into `{ns}/` as a starter set. Called once
@@ -122,5 +137,6 @@ export async function GET(request: Request) {
     }
   }
 
-  return Response.json(index, NO_STORE);
+  const headers = ns === "public" ? publicCacheHeaders(ns) : NO_STORE.headers;
+  return Response.json(index, { headers });
 }

@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { getVaultStorage } from "@/src/lib/storage";
 import { adminClient } from "@/src/lib/supabase/admin";
+import { hashBody } from "@/src/lib/mcp/tools/sections";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,25 @@ export async function GET(request: Request) {
   try {
     const content = await storage.read(`${prefix}${rel}`);
     if (content === null) return new Response("not found", { status: 404 });
-    return new Response(content, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
+
+    // SPRINT-024 Phase 3: ETag mirrors get_doc's `doc_content_hash` so
+    // browser/MCP clients can chain `If-None-Match` against the same
+    // value they receive from the MCP tools. 304 returns no body.
+    const etag = `"${hashBody(content)}"`;
+    const ifNoneMatch = request.headers.get("if-none-match");
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: etag, "cache-control": "no-store" },
+      });
+    }
+    return new Response(content, {
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "cache-control": "no-store",
+        ETag: etag,
+      },
+    });
   } catch (err) {
     return new Response(`read failed: ${(err as Error).message}`, { status: 500 });
   }

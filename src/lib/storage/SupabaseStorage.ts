@@ -1,5 +1,6 @@
 import { adminClient } from "@/src/lib/supabase/admin";
 import { syncDocEdges, deleteDocEdges } from "@/src/core/syncDocEdges";
+import { bustVaultCache } from "@/src/lib/cache/bust";
 import type { VaultFile, VaultStorage } from "./VaultStorage";
 
 const BUCKET = "vaults";
@@ -191,6 +192,11 @@ export class SupabaseStorage implements VaultStorage {
     // (documented asymmetry), but a failed sync means the edges are
     // wrong and the caller should know about it (HTTP 500).
     await syncDocEdges(adminClient(), split.namespace, split.file_path, content);
+
+    // SPRINT-024 Phase 3: bust the edge cache for this namespace + path.
+    // Personal namespaces aren't cached (no-store) so this is effectively
+    // a no-op for them; for `public` it invalidates the s-maxage tier.
+    bustVaultCache(split.namespace, split.file_path);
   }
 
   async delete(filePath: string): Promise<void> {
@@ -210,6 +216,9 @@ export class SupabaseStorage implements VaultStorage {
     // SPRINT-018 Phase 2: drop every edge touching this doc. Sync errors
     // propagate — see comment on write() above for the asymmetry note.
     await deleteDocEdges(adminClient(), split.namespace, split.file_path);
+
+    // SPRINT-024 Phase 3: see write() for cache busting rationale.
+    bustVaultCache(split.namespace, split.file_path);
   }
 
   async exists(filePath: string): Promise<boolean> {
