@@ -9,6 +9,7 @@
 // materialized table because the index load itself is cheap.
 
 import { loadVaultIndex } from "./vault";
+import { hashBody } from "./sections";
 import type { ToolContext } from "./types";
 import type { DocNode } from "../../../core/indexer";
 
@@ -31,6 +32,7 @@ interface ContextNode {
 interface ContextResult {
   focal: ContextNode;
   neighbors: ContextNode[];
+  doc_content_hash: string;
   budget: { used: number; limit: number; dropped_paths: string[] };
 }
 
@@ -116,6 +118,16 @@ export async function getContext(ctx: ToolContext, args: Record<string, unknown>
   const idx = await loadVaultIndex(ctx);
   const focal = idx.docs.find((d) => d.path === focalPath);
   if (!focal) throw new Error(`no such doc: ${focalPath}`);
+
+  // SPRINT-024 Phase 1: hash-conditional short-circuit. The hash is over the
+  // FOCAL doc's raw content — neighbourhood changes don't bust the cache,
+  // matching `get_doc`'s scope. Callers chasing a structural change must
+  // refetch unconditionally.
+  const docHash = hashBody(focal.content);
+  const expected = args.expected_content_hash !== undefined ? String(args.expected_content_hash) : "";
+  if (expected && expected === docHash) {
+    return json({ unchanged: true, path: focal.path, doc_content_hash: docHash });
+  }
 
   const visited = buildNeighborhood(focalPath, idx.edges, hops, includeAssociates);
   const byPath = new Map<string, DocNode>(idx.docs.map((d) => [d.path, d]));
@@ -208,6 +220,7 @@ export async function getContext(ctx: ToolContext, args: Record<string, unknown>
   const result: ContextResult = {
     focal: focalNode,
     neighbors,
+    doc_content_hash: docHash,
     budget: { used, limit, dropped_paths: dropped },
   };
   return json(result);

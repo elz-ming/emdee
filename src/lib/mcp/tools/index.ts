@@ -3,6 +3,7 @@ export { getSummary } from "./get_summary";
 export { getNeighbors } from "./get_neighbors";
 export { getContext } from "./get_context";
 export { getDoc } from "./get_doc";
+export { readDocSection } from "./read_doc_section";
 export { search } from "./search";
 export { appendSection } from "./append_section";
 export { patchSection } from "./patch_section";

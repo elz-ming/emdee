@@ -12,6 +12,7 @@ import {
   getNeighbors,
   getContext,
   getDoc,
+  readDocSection,
   search,
   appendSection,
   patchSection,
@@ -78,7 +79,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_context",
       description:
-        "Return the focal doc plus its multi-hop neighbourhood within a token budget. Focal + 1-hop neighbours get full bodies (when include_full=true); deeper hops get summary only. Nodes that don't fit in budget_tokens land in budget.dropped_paths. Use this instead of chaining get_doc + get_neighbors when you need a coherent local view of one doc and what surrounds it.",
+        "Return the focal doc plus its multi-hop neighbourhood within a token budget. Focal + 1-hop neighbours get full bodies (when include_full=true); deeper hops get summary only. Response includes `doc_content_hash` (hash of the FOCAL doc raw content). Pass `expected_content_hash` from a prior call to short-circuit when the focal hasn't changed (returns `{ unchanged: true, path, doc_content_hash }` — note that neighbourhood changes don't bust this; refetch unconditionally if you're chasing a structural change). Nodes that don't fit in budget_tokens land in budget.dropped_paths. Use this instead of chaining get_doc + get_neighbors when you need a coherent local view of one doc and what surrounds it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -87,6 +88,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           budget_tokens: { type: "number", description: "Rough token cap (chars÷4). Default 8000." },
           include_full: { type: "boolean", description: "Inline focal + hop-1 bodies. Default true." },
           include_associates: { type: "boolean", description: "Include assoc edges in the walk. Default true." },
+          expected_content_hash: { type: "string", description: "Hash from a prior get_context. If matches focal doc, returns { unchanged: true }." },
         },
         required: ["path"],
       },
@@ -94,12 +96,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_doc",
       description:
-        "Returns title + summary + preamble + section headings. Each section in `sections` carries `{ id, heading, content_hash }` — `id` is a stable short string for patch_section / append_section lookup (preferred over `heading` when the heading text is fuzzy or may collide), `content_hash` is the version guard for patch_section. Pass `full=true` for the body. Use `get_context` instead when you need the focal + its neighbourhood — cheaper than chaining get_doc + get_neighbors.",
+        "Returns title + summary + preamble + section headings + `doc_content_hash` (sha256 of raw content, first 16 hex). Each section in `sections` carries `{ id, heading, content_hash }` — `id` is a stable short string for patch_section / append_section lookup (preferred over `heading` when the heading text is fuzzy or may collide), `content_hash` is the version guard for patch_section. Pass `full=true` for the body. Pass `expected_content_hash` from a prior get_doc response to short-circuit: when matching, returns `{ unchanged: true, path, doc_content_hash }` and skips section parsing entirely. Use `get_context` instead when you need the focal + its neighbourhood.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
           full: { type: "boolean", description: "Include the full markdown content. Default false — light envelope only." },
+          expected_content_hash: { type: "string", description: "Hash from a prior get_doc response. If matches current doc, returns { unchanged: true }." },
+        },
+        required: ["path"],
+      },
+    },
+    {
+      name: "read_doc_section",
+      description:
+        "Read one H2 section's body without paying for the whole doc. Returns `{ path, section_id, heading, body, content_hash }`. Either `heading` or `section_id` (from get_doc.sections[].id) must be provided — `section_id` is preferred when available because it's an exact match instead of a fuzzy heading-name lookup. Mismatch returns `section_id_heading_mismatch`. Pass `expected_content_hash` from a prior read to short-circuit: when matching, returns `{ unchanged: true, section_id, content_hash }`. Use this instead of get_doc(full=true) when you only need one section.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          heading: { type: "string" },
+          section_id: { type: "string", description: "Preferred lookup key from get_doc.sections[].id." },
+          expected_content_hash: { type: "string", description: "Hash from a prior read. If matches, returns { unchanged: true }." },
         },
         required: ["path"],
       },
@@ -244,6 +262,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req): Promise<CallToolRes
     case "get_neighbors":     return await getNeighbors(ctx, a) as CallToolResult;
     case "get_context":       return await getContext(ctx, a) as CallToolResult;
     case "get_doc":           return await getDoc(ctx, a) as CallToolResult;
+    case "read_doc_section":  return await readDocSection(ctx, a) as CallToolResult;
     case "search":            return await search(ctx, a) as CallToolResult;
     case "append_section":    return await appendSection(ctx, a) as CallToolResult;
     case "patch_section":     return await patchSection(ctx, a) as CallToolResult;
