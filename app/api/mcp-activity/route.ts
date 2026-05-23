@@ -3,6 +3,12 @@ import { adminClient } from "@/src/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// Vercel function timeout cap. Pro plan tops out at 60s by default; if
+// the project is on Hobby (10s), the stream just reconnects sooner —
+// EventSource handles that automatically and seenIdsRef dedupes the
+// brief replay window. STREAM_MAX_MS below stays a hair under so we
+// close the stream cleanly before the runtime kills it.
+export const maxDuration = 60;
 
 const POLL_INTERVAL_MS = 1200;
 // Cap: how far back we look on the very first poll. The pulse is 2s

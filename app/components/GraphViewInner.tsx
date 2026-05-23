@@ -26,11 +26,14 @@ export interface Props {
   // publication root has no parent in the scoped index but we still want
   // the familiar parent-anchored layout.
   forceBranchLayout?: boolean;
-  // SPRINT-021: most-recent MCP tool-call event. Each new event (by id)
+  // SPRINT-021: shared queue of MCP tool-call events. Each new event
   // triggers a 2s pulse on the matching node (read=emerald, write=amber,
   // delete=red, rename=violet, lint/other=slate; search has no focal so
-  // it's a no-op here).
-  activityEvent?: McpActivityEvent | null;
+  // it's a no-op here). The queue is drained on every activityTick bump,
+  // so bursty multi-event ticks animate every node instead of collapsing
+  // to the last one.
+  activityQueue?: McpActivityEvent[];
+  activityTick?: number;
 }
 
 // SPRINT-021: pulse colour ramp by action kind. Matches the spec.
@@ -654,7 +657,7 @@ function syncGraph(
   }
 }
 
-export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddAssociation, onDeleteNode, onShareNode, onDownloadNode, onRenameNode, prevSibling, nextSibling, forceBranchLayout, activityEvent }: Props) {
+export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddAssociation, onDeleteNode, onShareNode, onDownloadNode, onRenameNode, prevSibling, nextSibling, forceBranchLayout, activityQueue, activityTick }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const focalIdRef = useRef<string | null>(null);
@@ -927,65 +930,78 @@ export function GraphViewInner({ index, activePath, onSelect, onAddChild, onAddA
     syncGraph(cy, layout);
   }, [layout]);
 
-  // SPRINT-021: pulse the matching node when a fresh activity event lands.
+  // SPRINT-021: pulse matching nodes whenever the activity queue grows.
+  // - The queue is owned upstream by App; we drain it on each activityTick
+  //   bump so bursty multi-event ticks (split_doc emitting several writes)
+  //   each animate their own node instead of collapsing to the last.
   // - Map<docPath, timeoutId> tracks active pulses; a second event on the
   //   same path within 2s restarts the timer instead of stacking.
-  // - We mutate the node's `pulseColor` data + size via animate(); a
-  //   companion style selector applies the same colour as a border ring.
-  // - Cleanup on unmount cancels every pending timeout.
+  // - seenIdsRef dedupes across SSE reconnects (each reconnect briefly
+  //   replays a 3s window) — a Set<id> is cheap and a fresh Set is
+  //   allocated when it grows beyond a soft cap to keep memory bounded.
   const pulseTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const seenEventIdRef = useRef<string | null>(null);
+  const seenIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!activityEvent) return;
-    if (activityEvent.id === seenEventIdRef.current) return;
-    seenEventIdRef.current = activityEvent.id;
+    const queue = activityQueue;
+    if (!queue || queue.length === 0) return;
     const cy = cyRef.current;
     if (!cy) return;
-    const path = activityEvent.doc_path;
-    if (!path) return; // search/list — no focal node to pulse
-    const node = cy.getElementById(path);
-    if (node.empty()) return; // node isn't in the currently-rendered scope
-    const colour = PULSE_COLOR[activityEvent.action_kind] ?? PULSE_COLOR.other;
 
-    // Cancel any in-flight pulse on this path so we don't stack.
-    const prev = pulseTimersRef.current.get(path);
-    if (prev) clearTimeout(prev);
-
-    node.data("pulseColor", colour);
-    node.data("pulseKind", activityEvent.action_kind);
-    // Stash the original width/height so we can restore on clear. (Each
-    // node kind has its own size — read off live to handle layer1/layer2
-    // differences without hardcoding.)
-    const baseW = Number(node.style("width") ?? 0) || 36;
-    const baseH = Number(node.style("height") ?? 0) || 36;
-    node.stop(true);
-    node.animate(
-      { style: { width: baseW * 1.25, height: baseH * 1.25 } },
-      {
-        duration: PULSE_MS / 2,
-        easing: "ease-out",
-        complete: () => {
-          node.animate(
-            { style: { width: baseW, height: baseH } },
-            { duration: PULSE_MS / 2, easing: "ease-in" },
-          );
-        },
-      },
-    );
-
-    const t = setTimeout(() => {
-      const cyNow = cyRef.current;
-      if (cyNow) {
-        const n = cyNow.getElementById(path);
-        if (!n.empty()) {
-          n.removeData("pulseColor");
-          n.removeData("pulseKind");
-        }
+    // Drain the queue in-place — App's ref-queue is shared.
+    const events = queue.splice(0, queue.length);
+    for (const evt of events) {
+      if (seenIdsRef.current.has(evt.id)) continue;
+      seenIdsRef.current.add(evt.id);
+      if (seenIdsRef.current.size > 500) {
+        // Bounded — older reconnect-replay windows can't matter anymore.
+        seenIdsRef.current = new Set();
+        seenIdsRef.current.add(evt.id);
       }
-      pulseTimersRef.current.delete(path);
-    }, PULSE_MS);
-    pulseTimersRef.current.set(path, t);
-  }, [activityEvent]);
+
+      const path = evt.doc_path;
+      if (!path) continue; // search/list — no focal node
+      const node = cy.getElementById(path);
+      if (node.empty()) continue; // not in current scope
+
+      const colour = PULSE_COLOR[evt.action_kind] ?? PULSE_COLOR.other;
+      const prev = pulseTimersRef.current.get(path);
+      if (prev) clearTimeout(prev);
+
+      node.data("pulseColor", colour);
+      node.data("pulseKind", evt.action_kind);
+      // node.width()/height() return numbers; node.style("width")
+      // returns "60px" which Number() turns into NaN.
+      const baseW = node.width();
+      const baseH = node.height();
+      node.stop(true);
+      node.animate(
+        { style: { width: baseW * 1.25, height: baseH * 1.25 } },
+        {
+          duration: PULSE_MS / 2,
+          easing: "ease-out",
+          complete: () => {
+            node.animate(
+              { style: { width: baseW, height: baseH } },
+              { duration: PULSE_MS / 2, easing: "ease-in" },
+            );
+          },
+        },
+      );
+
+      const t = setTimeout(() => {
+        const cyNow = cyRef.current;
+        if (cyNow) {
+          const n = cyNow.getElementById(path);
+          if (!n.empty()) {
+            n.removeData("pulseColor");
+            n.removeData("pulseKind");
+          }
+        }
+        pulseTimersRef.current.delete(path);
+      }, PULSE_MS);
+      pulseTimersRef.current.set(path, t);
+    }
+  }, [activityTick, activityQueue]);
 
   useEffect(() => {
     // Drain pending pulse timers on unmount.

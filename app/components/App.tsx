@@ -380,9 +380,17 @@ export function App({ namespace }: { namespace: string }) {
   // subscribe — the SSE route returns an empty stream for non-owners
   // anyway, but skipping the EventSource avoids a needless reconnect
   // loop on the public-vault view.
-  const [latestActivity, setLatestActivity] = useState<McpActivityEvent | null>(null);
+  //
+  // We push events into a ref-queue + bump a counter so bursty multi-
+  // event ticks (e.g. split_doc emitting several writes) don't collapse
+  // into a single render. GraphView drains the queue on each counter
+  // bump. The counter alone would re-render constantly; the queue alone
+  // would never trigger an effect — both together preserve every pulse.
+  const activityQueueRef = useRef<McpActivityEvent[]>([]);
+  const [activityTick, setActivityTick] = useState(0);
   const handleActivity = useCallback((e: McpActivityEvent) => {
-    setLatestActivity(e);
+    activityQueueRef.current.push(e);
+    setActivityTick((t) => t + 1);
   }, []);
   useMcpActivity(isOwnNamespace ? namespace : "", handleActivity);
 
@@ -1192,7 +1200,8 @@ export function App({ namespace }: { namespace: string }) {
                   onRenameNode={isOwnNamespace ? openRenameNode : undefined}
                   prevSibling={prevSibling}
                   nextSibling={nextSibling}
-                  activityEvent={latestActivity}
+                  activityQueue={activityQueueRef.current}
+                  activityTick={activityTick}
                 />
               )}
             </div>
