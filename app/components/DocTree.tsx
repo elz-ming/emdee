@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 import type { DocIndex, DocNode } from "@/src/core/indexer";
 
 export interface TreeNode {
@@ -115,6 +116,16 @@ interface DocTreeProps {
 }
 
 export function DocTree({ nodes, parentPath, parentTitle, activePath, collapsed, onSelect, onToggle }: DocTreeProps) {
+  const activeRowRef = useRef<HTMLButtonElement | null>(null);
+  // When the active doc changes (graph click, prev/next, deep link),
+  // scroll the matching row into view. `inline: "nearest"` also brings
+  // deeply-nested rows into the horizontal viewport so the leaf label is
+  // visible past the indent.
+  useEffect(() => {
+    if (!activeRowRef.current) return;
+    activeRowRef.current.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activePath]);
+
   if (nodes.length === 0) return null;
   const isRoot = parentPath === null;
   const siblingPrefix = siblingsCommonPrefix(nodes.map((n) => n.doc.title));
@@ -131,6 +142,7 @@ export function DocTree({ nodes, parentPath, parentTitle, activePath, collapsed,
       {nodes.map((n, i) => {
         const hasChildren = n.children.length > 0;
         const isCollapsed = collapsed.has(n.doc.path);
+        const isActive = n.doc.path === activePath;
         return (
           <li
             key={n.doc.path}
@@ -146,12 +158,13 @@ export function DocTree({ nodes, parentPath, parentTitle, activePath, collapsed,
             )}
             <div className="doc-tree-row-wrap">
               <button
+                ref={isActive ? activeRowRef : undefined}
                 className="doc-tree-row"
                 onClick={() => {
                   onSelect(n.doc.path);
                   if (hasChildren && isCollapsed) onToggle(n.doc.path);
                 }}
-                data-active={n.doc.path === activePath}
+                data-active={isActive}
                 type="button"
               >
                 {displayTitle(n.doc.title, parentTitle, siblingPrefix)}

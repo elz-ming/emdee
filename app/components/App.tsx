@@ -593,6 +593,37 @@ export function App({ namespace }: { namespace: string }) {
     setCollapsed(parents);
   }, [docTree]);
 
+  // Auto-expand the doc tree ancestors of the active doc so a graph click
+  // (or any external activePath change) lands the sidebar on a visible
+  // row. Only un-collapses ancestors — never re-collapses what the user
+  // already opened, and never touches the active doc's own collapse state
+  // (so its children stay where the user left them).
+  useEffect(() => {
+    if (!activePath || docTree.length === 0) return;
+    const trail: string[] = [];
+    const findPathTo = (nodes: TreeNode[], target: string, current: string[]): boolean => {
+      for (const n of nodes) {
+        const next = [...current, n.doc.path];
+        if (n.doc.path === target) {
+          trail.push(...current); // ancestors only — exclude the target itself
+          return true;
+        }
+        if (findPathTo(n.children, target, next)) return true;
+      }
+      return false;
+    };
+    findPathTo(docTree, activePath, []);
+    if (trail.length === 0) return;
+    setCollapsed((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const p of trail) {
+        if (next.delete(p)) changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [activePath, docTree]);
+
   // When shared docs arrive, expand the path from the root down to SHARED
   // so the user actually sees them. One-shot — if they later collapse,
   // we don't fight them.
