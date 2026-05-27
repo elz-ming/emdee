@@ -69,6 +69,11 @@ const PREV_SIBLING_SLOT = 1;
 const NEXT_SIBLING_SLOT = 7;
 const ROTATABLE_SLOTS_WITH_PARENT = [2, 3, 4, 5, 6];
 const ROTATABLE_SLOTS_ROOT = [0, 1, 2, 3, 4, 5, 6, 7];
+// For root focals: slot 0 is reserved as the "anchor" for the first
+// declared child (the canonical top-of-hierarchy node, e.g. VAULT under
+// EMDEE). Remaining children paginate through slots 1–7 so the anchor
+// stays pinned at 12 o'clock across every page.
+const ROTATABLE_SLOTS_ROOT_WITH_ANCHOR = [1, 2, 3, 4, 5, 6, 7];
 const LAYER2_PER_LAYER1 = 2;
 const RADIUS_LAYER1 = 240;
 const RADIUS_LAYER2 = 400;
@@ -277,21 +282,30 @@ function placeLayout(
   if (prevSiblingId) siblingIds.add(prevSiblingId);
   const rotatable = all.filter((n) => n.role !== "parent" && !siblingIds.has(n.id));
 
+  // Root focals get an "anchor child": the first declared child (author's
+  // first `## Parent of` bullet) gets pinned to slot 0 (12 o'clock) across
+  // every page, mirroring the semantic role parent has for non-root focals.
+  // For an entry doc like EMDEE, this keeps VAULT visually on top even as
+  // the other top-level pillars paginate beneath it. forceBranchLayout
+  // (public-share root) opts out — that view already pins lineage slots.
+  const isRootFocal = !parent && !forceBranchLayout;
+  const anchorChild = isRootFocal && rotatable.length > 0 ? rotatable[0] : null;
+  const paginated = anchorChild ? rotatable.slice(1) : rotatable;
+
   // Rotatable nodes fill a fixed list of slot positions in declared order.
   // With a parent: only the bottom-half slots (lineage slots 0/1/7 stay
-  // reserved). At root: all 8 slots — no lineage to reserve.
-  //
-  // forceBranchLayout overrides the root-detection: even when no parent
-  // exists in the (scoped) index, we still reserve the lineage slots so
-  // the layout matches the rest of the graph. Used by the public-share
-  // view at the publication root.
-  const rotatableSlots = (parent || forceBranchLayout) ? ROTATABLE_SLOTS_WITH_PARENT : ROTATABLE_SLOTS_ROOT;
+  // reserved). At root with an anchor: slots 1–7 (slot 0 reserved for the
+  // anchor). At root with no anchor (empty rotatable, edge case): all 8.
+  // forceBranchLayout: lineage slots reserved, bottom-half only.
+  const rotatableSlots = (parent || forceBranchLayout)
+    ? ROTATABLE_SLOTS_WITH_PARENT
+    : (anchorChild ? ROTATABLE_SLOTS_ROOT_WITH_ANCHOR : ROTATABLE_SLOTS_ROOT);
   const pageSize = rotatableSlots.length;
-  const totalRotatable = rotatable.length;
+  const totalRotatable = paginated.length;
   const totalPages = Math.max(1, Math.ceil(totalRotatable / pageSize));
   const safePage = ((page % totalPages) + totalPages) % totalPages;
   const pageStart = safePage * pageSize;
-  const onPage = rotatable.slice(pageStart, pageStart + pageSize);
+  const onPage = paginated.slice(pageStart, pageStart + pageSize);
 
   // Strip the parent prefix from the focal label too — "POKEAI — LOGS"
   // under parent POKEAI reads as just "LOGS". Picks the first declared
@@ -324,6 +338,23 @@ function placeLayout(
       position: { x: Math.cos(angle) * RADIUS_LAYER1, y: Math.sin(angle) * RADIUS_LAYER1 },
     });
     layer1Real.push(parent);
+  }
+
+  // Place anchor child at slot 0 for root focals. Styled as a regular
+  // layer1 child (not a parent) — visually it sits where the parent
+  // would, but the edge is a normal Parent-of-focal → anchor hierarchy
+  // edge (drawn elsewhere from the edge data, not synthesised here).
+  if (anchorChild) {
+    const angle = angleForSlot(PARENT_SLOT);
+    layer1AnglesById.set(anchorChild.id, angle);
+    placed.set(anchorChild.id, {
+      id: anchorChild.id,
+      label: shortLabel(anchorChild.id),
+      kind: "layer1",
+      category: categoryFor(anchorChild.id),
+      position: { x: Math.cos(angle) * RADIUS_LAYER1, y: Math.sin(angle) * RADIUS_LAYER1 },
+    });
+    layer1Real.push(anchorChild);
   }
 
   // Next sibling at slot 1 (1:30). Empty slot when none — no backfill.
