@@ -810,36 +810,37 @@ export function App({ namespace }: { namespace: string }) {
     if (match) selectDoc(match.path);
   }, [index, selectDoc, activePath, activeSharedDoc]);
 
-  // PDF export — flips to rendered mode, captures the markdown preview
-  // DOM via html2pdf.js, and triggers a direct download of "<title>.pdf".
-  // No browser print dialog. Dynamic import keeps the ~200KB lib out of
-  // the initial bundle; only loaded when the user hits Export.
+  // PDF export — server-side via /api/pdf (SPRINT-034). The route renders
+  // markdown with marked then prints through Puppeteer for vector output
+  // with clickable link annotations. Replaces the prior html2pdf.js
+  // pipeline which rasterised the DOM and lost <a href> to bitmap.
   const exportPdf = useCallback(async () => {
     if (!activeDoc) return;
-    setDocMode("rendered");
-    // Wait a frame for the editor to re-layout in rendered mode.
-    await new Promise((r) => setTimeout(r, 150));
-    const previewEl = document.querySelector<HTMLElement>(".toastui-editor-md-preview");
-    if (!previewEl) return;
-    const safeFilename =
-      (activeDoc.title || "doc").replace(/[/\\:*?"<>|]/g, "_").trim() || "doc";
+    const safe = (activeDoc.title || "doc").replace(/[/\\:*?"<>|]/g, "_").trim() || "doc";
     try {
-      const html2pdf = (await import("html2pdf.js")).default;
-      await html2pdf()
-        .set({
-          margin: [12, 14, 14, 14],
-          filename: `${safeFilename}.pdf`,
-          image: { type: "jpeg", quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"] },
-        })
-        .from(previewEl)
-        .save();
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          activeSharedDoc
+            ? { path: activeSharedDoc.path, sharedOwnerId: activeSharedDoc.ownerId, title: activeDoc.title }
+            : { path: activeDoc.path, ns: namespace, title: activeDoc.title }
+        ),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safe}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (e) {
       console.error("PDF export failed:", e);
     }
-  }, [activeDoc]);
+  }, [activeDoc, activeSharedDoc, namespace]);
 
   // Copy a ready-made LLM prompt that points Claude/ChatGPT at this doc
   // via the EMDEE MCP. Ends with "Then:" + blank lines so the cursor
@@ -1501,6 +1502,7 @@ export function App({ namespace }: { namespace: string }) {
         <DownloadModal
           path={downloadCtx.focalPath}
           title={downloadCtx.focalTitle}
+          namespace={namespace}
           index={index}
           onClose={() => setDownloadCtx(null)}
         />

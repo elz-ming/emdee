@@ -7,6 +7,9 @@ import type { DocIndex } from "@/src/core/indexer";
 interface Props {
   path: string;
   title: string;
+  /** Owner namespace (clerk userId) — passed to /api/pdf so the server
+   *  reads from the correct vault. */
+  namespace: string;
   index: DocIndex | null;
   onClose: () => void;
 }
@@ -101,15 +104,7 @@ function rewriteZipPath(
   return [...renamedDirs, `${candidate}${ext}`].join("/");
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-
-export function DownloadModal({ path, title, index, onClose }: Props) {
+export function DownloadModal({ path, title, namespace, index, onClose }: Props) {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([path]));
   const [format, setFormat] = useState<Format>("pdf");
   const [busy, setBusy] = useState(false);
@@ -174,80 +169,35 @@ export function DownloadModal({ path, title, index, onClose }: Props) {
         }
         if (added === 0) throw new Error("No content available to download.");
       } else {
-        // Render each doc through Toast UI's Viewer — same component
-        // that drives the in-app rendered preview — so the PDF matches
-        // what the single-doc "Export PDF" button produces. The viewer
-        // is mounted once and reused via setMarkdown for each doc.
-        const html2pdf = (await import("html2pdf.js")).default;
-        const ViewerModule = await import("@toast-ui/editor/dist/toastui-editor-viewer");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const Viewer: any = (ViewerModule as any).default ?? ViewerModule;
+        // SPRINT-034: server-side PDF via /api/pdf. Each doc is one POST;
+        // Puppeteer prints to a vector PDF with clickable link
+        // annotations (the prior html2pdf raster pipeline lost them).
+        // Sequential to keep memory bounded — concurrent Puppeteer pages
+        // would balloon Vercel function memory on large vaults.
+        const titleByPath = new Map<string, string>();
+        if (index) for (const d of index.docs) titleByPath.set(d.path, d.title);
 
-        // Wrapper holds the off-screen position; host stays free of
-        // position-related inline styles so html2pdf's clone doesn't
-        // inherit `left:-99999px` and draw off the page.
-        const wrapper = document.createElement("div");
-        wrapper.style.cssText =
-          "position:absolute;left:-99999px;top:0;width:794px;background:#ffffff;";
-        const host = document.createElement("div");
-        host.style.cssText =
-          "width:794px;background:#ffffff;padding:24px;color:#111827;" +
-          "font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;";
-        wrapper.appendChild(host);
-        document.body.appendChild(wrapper);
-
-        // Mirror DocEditorInner's customHTMLRenderer so [[wiki-links]]
-        // render as styled spans instead of literal brackets.
-        const viewer = new Viewer({
-          el: host,
-          initialValue: "",
-          customHTMLRenderer: {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            text(node: any) {
-              const literal: string = node.literal ?? "";
-              const escaped = escapeHtml(literal);
-              const html = escaped.replace(/\[\[([^\]]+)\]\]/g, (_: string, t: string) => {
-                const safe = t.replace(/"/g, "&quot;");
-                return `<span class="wiki-link" title="${safe}">${t}</span>`;
-              });
-              return [{ type: "html", content: html }];
-            },
-          },
-        });
-
-        try {
-          let added = 0;
-          for (const p of sorted) {
-            const content = contentByPath.get(p);
-            if (typeof content !== "string") continue;
-            viewer.setMarkdown(content);
-            // Force layout before html2pdf measures the source.
-            void host.offsetHeight;
-            await new Promise<void>((r) => requestAnimationFrame(() => r()));
-            const worker = html2pdf()
-              .set({
-                margin: [12, 14, 14, 14],
-                image: { type: "jpeg", quality: 0.95 },
-                html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-                jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-                pagebreak: { mode: ["css", "legacy"] },
-                width: 794,
-                windowWidth: 794,
-              })
-              .from(host);
-            const pdfOut = await worker.output("blob");
-            const pdfBlob = pdfOut instanceof Blob ? pdfOut : new Blob([pdfOut]);
-            const rel = p.startsWith(prefix) ? p.slice(prefix.length) : p;
-            const zipPath = rewriteZipPath(rel, ".pdf", slugToTitle, usedByDir);
-            zip.file(zipPath, pdfBlob);
-            added++;
-            setProgress({ done: added, total: sorted.length });
-          }
-          if (added === 0) throw new Error("No content available to download.");
-        } finally {
-          try { viewer.destroy(); } catch {}
-          wrapper.remove();
+        let added = 0;
+        for (const p of sorted) {
+          if (!contentByPath.has(p)) continue;
+          const res = await fetch("/api/pdf", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              path: p,
+              ns: namespace,
+              title: titleByPath.get(p) ?? p,
+            }),
+          });
+          if (!res.ok) throw new Error(`PDF generation failed for ${p}: HTTP ${res.status}`);
+          const pdfBlob = await res.blob();
+          const rel = p.startsWith(prefix) ? p.slice(prefix.length) : p;
+          const zipPath = rewriteZipPath(rel, ".pdf", slugToTitle, usedByDir);
+          zip.file(zipPath, pdfBlob);
+          added++;
+          setProgress({ done: added, total: sorted.length });
         }
+        if (added === 0) throw new Error("No content available to download.");
       }
 
       const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });

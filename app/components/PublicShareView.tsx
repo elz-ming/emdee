@@ -193,32 +193,37 @@ export function PublicShareView({ publication, index, isSignedIn }: Props) {
     );
   }, [logEvent]);
 
-  // Direct PDF download via html2pdf.js (same library + options as the
-  // owner-side Export PDF). Targets the rendered preview DOM.
+  // PDF export — server-side via /api/pdf (SPRINT-034). The publication's
+  // handle + slug authorise the path against included_paths server-side,
+  // and Puppeteer emits a vector PDF with clickable link annotations.
   const exportPdf = useCallback(async () => {
     if (!activeDoc) return;
-    await new Promise((r) => setTimeout(r, 60));
-    const previewEl = document.querySelector<HTMLElement>(".toastui-editor-md-preview");
-    if (!previewEl) return;
-    const safeFilename =
-      (activeDoc.title || "doc").replace(/[/\\:*?"<>|]/g, "_").trim() || "doc";
+    const safe = (activeDoc.title || "doc").replace(/[/\\:*?"<>|]/g, "_").trim() || "doc";
     try {
-      const html2pdf = (await import("html2pdf.js")).default;
-      await html2pdf()
-        .set({
-          margin: [12, 14, 14, 14],
-          filename: `${safeFilename}.pdf`,
-          image: { type: "jpeg", quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-          pagebreak: { mode: ["css", "legacy"] },
-        })
-        .from(previewEl)
-        .save();
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          path: activeDoc.path,
+          publicationHandle: publication.handle,
+          publicationSlug: publication.slug,
+          title: activeDoc.title,
+        }),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safe}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (e) {
       console.error("PDF export failed:", e);
     }
-  }, [activeDoc]);
+  }, [activeDoc, publication.handle, publication.slug]);
 
   return (
     <div className="app" data-public-share="true">
