@@ -1,0 +1,153 @@
+# .github/workflows/pr-reviewer.yml
+# EMDEE_OS PR Reviewer — gathers evidence, posts ONE structured comment, never merges.
+# Mode: partial. Real signals today = typecheck + build. No test suite yet (see Tests line).
+# Faithful to [[Automate the Review Labor Not the Merge Decision]]: automate the labor, keep the decision human.
+
+name: PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read          # bump to write only if you opt into the inline-screenshot upgrade (see bottom)
+  pull-requests: write    # post the review comment
+  id-token: write        # claude-code-action authenticates via OIDC — required
+
+concurrency:
+  group: pr-reviewer-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need base for changed-file diff
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20         # TUNE: match EMDEE_OS's actual Node version if pinned
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Prepare evidence dir
+        run: mkdir -p evidence
+
+      # --- Signal 1: typecheck (real green signal today) ---
+      - name: Typecheck
+        id: typecheck
+        continue-on-error: true
+        run: |
+          if npx tsc --noEmit > evidence/typecheck.txt 2>&1; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- Signal 2: production build (real green signal today) ---
+      - name: Build
+        id: build
+        continue-on-error: true
+        run: |
+          if npm run build > evidence/build.txt 2>&1; then
+            echo "status=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- Signal 3: lint on CHANGED FILES only (absolute is useless: 27 pre-existing) ---
+      - name: Lint changed files
+        id: lint
+        continue-on-error: true
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE"...HEAD | grep -E '\.(ts|tsx|js|jsx)$' || true)
+          if [ -z "$FILES" ]; then
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            echo "note=no JS/TS files changed" >> "$GITHUB_OUTPUT"
+          else
+            npx eslint $FILES -f json > evidence/lint-changed.json 2>/dev/null || true
+            CT=$(node -e "try{const e=require('./evidence/lint-changed.json');console.log(e.reduce((n,f)=>n+f.errorCount,0))}catch{console.log(0)}")
+            echo "count=$CT" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- Signal 4: wait for the Vercel preview, screenshot it ---
+      - name: Wait for Vercel preview URL
+        id: preview
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.pull_request.head.sha }}"
+          REPO="${{ github.repository }}"
+          URL=""
+          for i in $(seq 1 24); do   # ~4 min ceiling
+            for ID in $(gh api "repos/$REPO/deployments?sha=$SHA&per_page=100" --jq '.[].id' 2>/dev/null); do
+              U=$(gh api "repos/$REPO/deployments/$ID/statuses?per_page=100" \
+                --jq 'map(select(.state=="success" and .environment_url != null)) | (.[0].environment_url // empty)' 2>/dev/null)
+              if [ -n "$U" ]; then URL="$U"; break; fi
+            done
+            [ -n "$URL" ] && break
+            sleep 10
+          done
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          [ -z "$URL" ] && echo "::warning::No preview URL via Deployments API — verify the payload."
+
+      - name: Screenshot preview
+        if: steps.preview.outputs.url != '' && steps.preview.outputs.url != 'null'
+        continue-on-error: true
+        run: |
+          npx playwright@latest install --with-deps chromium
+          npx playwright@latest screenshot --full-page "${{ steps.preview.outputs.url }}" evidence/preview.png
+
+      - name: Compose evidence summary
+        if: always()
+        run: |
+          {
+            echo "## Computed signals (authoritative — use these exact values)"
+            echo "- Typecheck: ${{ steps.typecheck.outputs.status }}"
+            echo "- Build: ${{ steps.build.outputs.status }}"
+            echo "- Lint errors on changed files: ${{ steps.lint.outputs.count }} ${{ steps.lint.outputs.note }}"
+            echo "- Tests: NONE — no suite exists in this repo; 'green' is not a trustworthy signal yet."
+            echo "- Preview URL: ${{ steps.preview.outputs.url }}"
+            echo "- Screenshot + raw logs: attached to this run as the 'pr-review-evidence' artifact."
+          } > evidence/summary.md
+
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-review-evidence
+          path: evidence/
+
+      # --- The brain: read diff + evidence, post ONE structured comment. No merge. ---
+      - name: Synthesize review comment
+        if: always()
+        uses: anthropics/claude-code-action@v1
+        with:
+          # AUTH: default is the API key. If you connected via the Claude GitHub App (OAuth),
+          # delete this line and use:  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: >
+            Read .github/pr-reviewer-prompt.md and follow it exactly.
+            Read evidence/summary.md for the authoritative signal values, and evidence/*.txt
+            for raw logs. Review the PR diff. Post exactly ONE review comment using the template.
+            Do NOT approve, do NOT merge — comment only.
+          claude_args: "--max-turns 15 --model claude-sonnet-4-6"
+          # For a deeper review on gnarly PRs, swap to: --model claude-opus-4-8
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OPTIONAL UPGRADE — inline screenshot in the comment (instead of artifact link):
+#   1. Set permissions.contents: write above.
+#   2. After "Screenshot preview", push evidence/preview.png to an orphan branch
+#      'pr-previews' at path pr-<number>/preview.png, then reference its raw URL
+#      (https://raw.githubusercontent.com/<owner>/<repo>/pr-previews/pr-<number>/preview.png)
+#      in the comment. Works because EMDEE_OS is public. Costs a side-branch commit per PR.
+#   Left out of the default to keep permissions minimal and avoid branch side-effects.
+# ──────────────────────────────────────────────────────────────────────────────
